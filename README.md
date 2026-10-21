@@ -61,6 +61,38 @@ const posts = defineCollection({ loader: sveltiaLoader("posts") });
 export const collections = { posts };
 ```
 
+## Cloudflare R2 Media Storage
+
+This package seamlessly passes through Sveltia CMS's native `media_libraries` configuration, meaning it natively supports **Cloudflare R2** (as well as Amazon S3, Backblaze B2, etc.) without any changes to the integration's source code.
+
+To use Cloudflare R2 as your media backend, configure it directly in your `astro.config.mjs`:
+
+```js
+sveltia({
+    config: {
+        backend: { name: "github", repo: "user/repo", branch: "main" },
+        // Add your R2 configuration here
+        media_libraries: {
+            cloudflare_r2: {
+                access_key_id: "your-64-hex-access-key-id",
+                bucket: "my-r2-bucket",
+                account_id: "your-account-id",
+                public_url: "https://pub-xxx.r2.dev", // or your custom domain
+                prefix: "cms-uploads/", // optional
+            },
+        },
+        collections: [
+            /* ... */
+        ],
+    },
+});
+```
+
+> **Important Security Note:**
+> The R2 Secret Access Key is never written in the config. Sveltia CMS prompts users to enter it in the CMS UI on first access to the media library, and it is stored securely only in the browser's local storage.
+
+For detailed instructions on CORS setup, public URL configuration, and credential details, please refer to the Sveltia CMS R2 documentation.
+
 ## Multi-language Support (i18n)
 
 This package supports Sveltia CMS's multi-language folder structure (`multiple_folders`).
@@ -97,17 +129,13 @@ import { sveltiaLoader } from "astro-sveltia-pages/loader";
 
 export const collections = {
     // English collections (reads from src/content/blog/en/)
-    blog_en: defineCollection({
-        loader: sveltiaLoader("blog", { locale: "en" }),
-    }),
+    blog_en: defineCollection({ loader: sveltiaLoader("blog", { locale: "en" }) }),
     products_en: defineCollection({
         loader: sveltiaLoader("products", { locale: "en" }),
     }),
 
     // Chinese collections (reads from src/content/blog/zh/)
-    blog_zh: defineCollection({
-        loader: sveltiaLoader("blog", { locale: "zh" }),
-    }),
+    blog_zh: defineCollection({ loader: sveltiaLoader("blog", { locale: "zh" }) }),
     products_zh: defineCollection({
         loader: sveltiaLoader("products", { locale: "zh" }),
     }),

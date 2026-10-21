@@ -1,6 +1,6 @@
 {
     "name": "astro-sveltia-pages",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "description": "Zero-config Sveltia CMS integration for Astro with built-in OAuth, optimized for Cloudflare Pages.",
     "keywords": [
         "astro-integration",
@@ -50,7 +50,7 @@
         "prepare": "vp config"
     },
     "dependencies": {
-        "@sveltia/cms": "^0.233.1",
+        "@sveltia/cms": "^0.248.1",
         "zod-to-ts": "^2.0.0"
     },
     "devDependencies": {
