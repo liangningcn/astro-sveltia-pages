@@ -1,221 +1,133 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import type { CmsConfig, EntryCollection } from "@sveltia/cms";
-import type { AstroConfig, AstroIntegration, HookParameters } from "astro";
+import type { AstroIntegration, AstroIntegrationLogger } from "astro";
+import { dump } from "js-yaml";
 
-import { isEntryCollection } from "./config.js";
+import {
+    DEFAULT_APP_TITLE,
+    DEFAULT_SVELTIA_VERSION,
+    buildCmsConfig,
+} from "./build-config.js";
+import { injectCollectionTypes, writeConfigToDisk } from "./codegen.js";
+import { LOG_PREFIX, validateOptions, type SveltiaPagesOptions } from "./options.js";
 
-export type { CmsConfig };
+export type { BuildCmsConfigResult } from "./build-config.js";
+export type { SveltiaCollection, SveltiaPagesOptions } from "./options.js";
 
-export type SveltiaOptions = {
-    route?: string;
-    title?: string;
-    config: CmsConfig;
-    /** Set to `false` to skip the built-in GitHub OAuth routes. */
-    oauth?: boolean;
-};
+const SCHEMA_COMMENT =
+    "# yaml-language-server: $schema=https://unpkg.com/@sveltia/cms/schema/sveltia-cms.json";
+const ADMIN_DIR = "admin";
 
-const VIRTUAL_MODULE_ID = "virtual:astro-sveltia-pages/config";
-const RESOLVED_VIRTUAL_MODULE_ID = "\0" + VIRTUAL_MODULE_ID;
-
-const OAUTH_AUTH_ROUTE = "/api/auth";
-const OAUTH_CALLBACK_ROUTE = "/api/callback";
-
-/** Sveltia requires `collections` or `singletons`; this hidden one prevents a crash. */
-const PLACEHOLDER_COLLECTION_NAME = "__sveltia_placeholder__";
-
-const PLACEHOLDER_COLLECTION: EntryCollection = {
-    name: PLACEHOLDER_COLLECTION_NAME,
-    label: "Placeholder",
-    folder: "src/content",
-    hide: true,
-    fields: [{ name: "title", label: "Title", widget: "string" }],
-};
-
-type ConfigSetupOptions = HookParameters<"astro:config:setup">;
-type TrailingSlash = AstroConfig["trailingSlash"];
-
-/** `trailingSlash: "always"` requires the injected page route to end with a slash. */
-function applyTrailingSlash(route: string, trailingSlash: TrailingSlash): string {
-    if (trailingSlash === "always" && !route.endsWith("/")) {
-        return `${route}/`;
-    }
-
-    return route;
+/** Editor-only schema hint; Sveltia CMS does not depend on it at runtime. */
+function buildConfigYaml(config: Record<string, unknown>): string {
+    return `${SCHEMA_COMMENT}\n${dump(config, { lineWidth: -1, noRefs: true })}`;
 }
 
-function getCollectionNames(config: CmsConfig): string[] {
-    return (config.collections ?? [])
-        .filter(isEntryCollection)
-        .map((collection) => collection.name)
-        .filter((name) => name !== PLACEHOLDER_COLLECTION_NAME);
-}
-
-function withPlaceholderCollection(config: CmsConfig): CmsConfig {
-    if ((config.collections ?? []).length > 0) {
-        return config;
-    }
-
-    return { ...config, collections: [PLACEHOLDER_COLLECTION] };
-}
-
-function buildVirtualModuleSource(config: CmsConfig, title: string): string {
-    // JSON.stringify is safe here: the config is user-controlled and served as a
-    // JS module (not injected into an HTML script tag), so </script> sequences
-    // are not a concern. Any unusual Unicode is the user's responsibility.
-    return `
-    export const config = ${JSON.stringify(config)};
-    export const title = ${JSON.stringify(title)};
-  `;
-}
-
-function buildTypeDeclaration(collectionNames: string[]): string {
-    if (collectionNames.length === 0) {
-        return "";
-    }
-
-    const unionType = collectionNames.map((n) => JSON.stringify(n)).join(" | ");
-
-    return `declare module "astro-sveltia-pages/loader" {
-  import type { EntryCollection } from "@sveltia/cms";
-  import type { SveltiaLoader } from "astro-sveltia-pages/loader";
-
-  type SveltiaCollectionName = ${unionType};
-
-  export function sveltiaLoader(
-    name: SveltiaCollectionName,
-    options?: { locale?: string },
-  ): SveltiaLoader;
-  export function sveltiaLoader(
-    collection: EntryCollection,
-    options?: { locale?: string },
-  ): SveltiaLoader;
-}
+function buildIndexHtml(appTitle: string, sveltiaVersion: string): string {
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>${appTitle}</title>
+    <link rel="cms-config-url" href="/${ADMIN_DIR}/config.yml" />
+  </head>
+  <body>
+    <script src="https://unpkg.com/@sveltia/cms@${sveltiaVersion}/dist/sveltia-cms.js"></script>
+  </body>
+</html>
 `;
 }
 
-/** Serve the CMS config and title to `admin.astro` through a virtual module. */
-function setupVirtualModule(
-    updateConfig: ConfigSetupOptions["updateConfig"],
-    config: CmsConfig,
-    title: string,
+/**
+ * Generates `admin/index.html` and `admin/config.yml` into the build output.
+ * Any write failure aborts the build instead of degrading to a warning.
+ */
+function writeAdminFiles(
+    outDir: URL,
+    config: Record<string, unknown>,
+    appTitle: string,
+    sveltiaVersion: string,
+    logger: AstroIntegrationLogger,
 ): void {
-    updateConfig({
-        vite: {
-            plugins: [
-                {
-                    name: "vite-plugin-astro-loader-sveltia-cms-config",
-                    resolveId(id) {
-                        if (id === VIRTUAL_MODULE_ID) {
-                            return RESOLVED_VIRTUAL_MODULE_ID;
-                        }
-                    },
-                    load(id) {
-                        if (id === RESOLVED_VIRTUAL_MODULE_ID) {
-                            return buildVirtualModuleSource(config, title);
-                        }
-                    },
-                },
-            ],
-        },
-    });
-}
+    try {
+        const adminDirUrl = new URL(`${ADMIN_DIR}/`, outDir);
+        const adminDir = fileURLToPath(adminDirUrl);
 
-/** Persist the CMS config for the content loader's name-based lookup. */
-function writeConfigToDisk(
-    createCodegenDir: ConfigSetupOptions["createCodegenDir"],
-    userConfig: CmsConfig,
-): void {
-    // Write the config without the hidden placeholder so the content
-    // loader only sees collections the user has defined.
-    const codegenDir = createCodegenDir();
+        mkdirSync(adminDir, { recursive: true });
+        writeFileSync(
+            fileURLToPath(new URL("config.yml", adminDirUrl)),
+            buildConfigYaml(config),
+        );
+        writeFileSync(
+            fileURLToPath(new URL("index.html", adminDirUrl)),
+            buildIndexHtml(appTitle, sveltiaVersion),
+        );
+    } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
 
-    writeFileSync(
-        fileURLToPath(new URL("config.json", codegenDir)),
-        JSON.stringify(userConfig),
-    );
-}
-
-/** Inject the GitHub OAuth endpoints when the GitHub backend is configured. */
-function injectOAuthRoutes(
-    injectRoute: ConfigSetupOptions["injectRoute"],
-    userConfig: CmsConfig,
-    oauthEnabled: boolean,
-    logger: ConfigSetupOptions["logger"],
-): void {
-    if (oauthEnabled && userConfig.backend.name === "github") {
-        injectRoute({
-            pattern: OAUTH_AUTH_ROUTE,
-            entrypoint: fileURLToPath(
-                new URL("./routes/auth.mjs", import.meta.url),
-            ),
-            prerender: false,
-        });
-        injectRoute({
-            pattern: OAUTH_CALLBACK_ROUTE,
-            entrypoint: fileURLToPath(
-                new URL("./routes/callback.mjs", import.meta.url),
-            ),
-            prerender: false,
-        });
-
-        logger.info(
-            `Sveltia CMS GitHub OAuth routes injected at ${OAUTH_AUTH_ROUTE} ` +
-                `and ${OAUTH_CALLBACK_ROUTE}`,
+        logger.error(`Failed to write the admin UI files: ${message}`);
+        throw new Error(
+            `${LOG_PREFIX} Failed to write the admin UI files: ${message}`,
+            { cause },
         );
     }
 }
 
-export default function sveltiaCms(options: SveltiaOptions): AstroIntegration {
-    const route = options.route ?? "/admin";
-    const title = options.title ?? "Sveltia CMS";
-    const oauthEnabled = options.oauth !== false;
-    const userConfig: CmsConfig = {
-        media_folder: "public/uploads",
-        public_folder: "/uploads",
-        ...options.config,
-        load_config_file: false,
-    };
-    const cmsConfig = withPlaceholderCollection(userConfig);
+export default function sveltiaPages(options: SveltiaPagesOptions): AstroIntegration {
+    validateOptions(options);
+
+    const appTitle = options.appTitle ?? DEFAULT_APP_TITLE;
+    const sveltiaVersion = options.sveltiaVersion ?? DEFAULT_SVELTIA_VERSION;
+    // Captured during `astro:config:setup` (when Astro's `site` is available)
+    // and reused in `astro:build:done`, which has no config access.
+    let cmsConfig: Record<string, unknown> | undefined;
 
     return {
-        name: "astro-loader-sveltia-cms",
+        name: "astro-sveltia-pages",
         hooks: {
-            "astro:config:setup": ({
-                config,
-                injectRoute,
-                updateConfig,
-                createCodegenDir,
-                logger,
-            }) => {
-                const routePattern = applyTrailingSlash(route, config.trailingSlash);
+            "astro:config:setup": ({ config, createCodegenDir, logger }) => {
+                const { config: generated, conflicts } = buildCmsConfig(
+                    options,
+                    config.site,
+                );
 
-                injectRoute({
-                    pattern: routePattern,
-                    entrypoint: fileURLToPath(
-                        new URL("./admin.astro", import.meta.url),
-                    ),
-                });
+                for (const key of conflicts) {
+                    logger.warn(
+                        `extraConfig key "${key}" overrides the generated value.`,
+                    );
+                }
 
-                injectOAuthRoutes(injectRoute, userConfig, oauthEnabled, logger);
-                writeConfigToDisk(createCodegenDir, userConfig);
-                setupVirtualModule(updateConfig, cmsConfig, title);
+                cmsConfig = generated;
+                writeConfigToDisk(createCodegenDir, generated);
 
-                logger.info(`Sveltia CMS injected at ${routePattern}`);
+                logger.info(
+                    `CMS config generated for ${options.collections.length} ` +
+                        `collection(s); the admin UI will be written to /${ADMIN_DIR}/ at build time.`,
+                );
             },
 
             "astro:config:done": ({ injectTypes }) => {
-                const collectionNames = getCollectionNames(userConfig);
+                const finalConfig =
+                    cmsConfig ?? buildCmsConfig(options, undefined).config;
 
-                if (collectionNames.length === 0) {
-                    return;
-                }
+                injectCollectionTypes(injectTypes, finalConfig as never);
+            },
 
-                injectTypes({
-                    filename: "types.d.ts",
-                    content: buildTypeDeclaration(collectionNames),
-                });
+            "astro:build:done": ({ dir, logger }) => {
+                const finalConfig =
+                    cmsConfig ?? buildCmsConfig(options, undefined).config;
+
+                writeAdminFiles(
+                    dir,
+                    finalConfig as Record<string, unknown>,
+                    appTitle,
+                    sveltiaVersion,
+                    logger,
+                );
+                logger.info(`Sveltia CMS admin UI written to /${ADMIN_DIR}/.`);
             },
         },
     };

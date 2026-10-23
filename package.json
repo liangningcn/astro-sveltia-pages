@@ -1,7 +1,7 @@
 {
     "name": "astro-sveltia-pages",
-    "version": "0.2.3",
-    "description": "Zero-config Sveltia CMS integration for Astro with built-in OAuth, optimized for Cloudflare Pages.",
+    "version": "0.2.5",
+    "description": "Generates /admin (index.html + config.yml) for Sveltia CMS, with Cloudflare R2 media support and a GitHub OAuth template for Cloudflare Pages.",
     "keywords": [
         "astro-integration",
         "astro-loader",
@@ -28,13 +28,13 @@
     ],
     "type": "module",
     "types": "./dist/index.d.mts",
+    "bin": {
+        "astro-sveltia-pages": "./dist/cli.mjs"
+    },
     "exports": {
         ".": "./dist/index.mjs",
         "./loader": "./dist/loader.mjs",
-        "./routes/auth": "./dist/routes/auth.mjs",
-        "./routes/callback": "./dist/routes/callback.mjs",
-        "./package.json": "./package.json",
-        "./admin.astro": "./dist/admin.astro"
+        "./package.json": "./package.json"
     },
     "publishConfig": {
         "access": "public"
@@ -51,9 +51,11 @@
     },
     "dependencies": {
         "@sveltia/cms": "^0.248.1",
+        "js-yaml": "^4.1.0",
         "zod-to-ts": "^2.0.0"
     },
     "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
         "@types/node": "^25.6.2",
         "@typescript/native-preview": "7.0.0-dev.20260509.2",
         "astro": "^7.3.8",

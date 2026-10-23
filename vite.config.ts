@@ -1,23 +1,23 @@
 import { defineConfig } from "vite-plus";
 
+// vite-plus's bundled tsdown honours `dts.resolve` at runtime, but its public
+// type predates the option; keep a typed passthrough so `check` stays clean.
+const dtsOptions = { tsgo: true, resolve: false } as never;
+
 export default defineConfig({
     staged: { "*": "vp check --fix" },
     pack: {
         entry: {
             index: "./src/index.ts",
             loader: "./src/loader.ts",
-            "routes/auth": "./src/routes/auth.ts",
-            "routes/callback": "./src/routes/callback.ts",
+            cli: "./src/cli.ts",
         },
-        copy: [{ from: "src/admin.astro", to: "dist" }],
-        dts: { tsgo: true },
-        exports: {
-            customExports: {
-                "./admin.astro": "./dist/admin.astro",
-                "./routes/auth": "./dist/routes/auth.mjs",
-                "./routes/callback": "./dist/routes/callback.mjs",
-            },
-        },
+        copy: [{ from: "templates", to: "dist" }],
+        // Do not inline dependency types: `@sveltia/cms` pulls in `immutable`,
+        // whose ambient .d.ts breaks dts bundling. The generated .d.ts keeps
+        // `import("@sveltia/cms")` references instead, so the package stays a
+        // runtime dependency for type resolution.
+        dts: dtsOptions,
     },
     lint: {
         ignorePatterns: ["dist/**", "example/**"],

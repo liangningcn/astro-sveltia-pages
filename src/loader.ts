@@ -78,8 +78,9 @@ function resolveI18n(
     }
 
     // Collection-level options take precedence over the global ones.
+    // Spreading `null`/`undefined` is a no-op, so no fallback object is needed.
     if (collectionI18n && typeof collectionI18n === "object") {
-        return { ...(globalI18n ?? {}), ...collectionI18n };
+        return { ...globalI18n, ...collectionI18n };
     }
 
     return globalI18n;
