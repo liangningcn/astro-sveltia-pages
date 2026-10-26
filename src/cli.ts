@@ -30,14 +30,14 @@ type PlatformDescriptor = {
 const PLATFORMS: Record<InitPlatform, PlatformDescriptor> = {
     cloudflare: {
         label: "Cloudflare Pages",
-        template: "templates/functions/auth.js",
+        template: "templates/auth.js",
         dir: "functions",
         envHint: "the Cloudflare Pages dashboard (Settings -> Environment variables)",
         siteHint: "the Cloudflare Pages dashboard",
     },
     edgeone: {
         label: "EdgeOne Pages",
-        template: "templates/edge-functions/auth.js",
+        template: "templates/auth.js",
         dir: "edge-functions",
         envHint:
             "the EdgeOne Pages dashboard (Project settings -> Environment variables)",
@@ -164,11 +164,25 @@ function appendEnvEntries(envExamplePath: string, platform: InitPlatform): void 
 
 function copyAuthTemplate(platform: InitPlatform, cwd: string): void {
     const descriptor = PLATFORMS[platform];
-    const templatePath = resolveTemplatePath(descriptor.template);
 
-    if (!existsSync(templatePath)) {
+    // Prefer the unified auto-detecting template; fall back to the old
+    // per-platform layout for packages built before 0.3.0.
+    const candidates = [descriptor.template, `templates/${descriptor.dir}/auth.js`];
+
+    let templatePath: string | undefined;
+
+    for (const relative of candidates) {
+        const candidate = resolveTemplatePath(relative);
+
+        if (existsSync(candidate)) {
+            templatePath = candidate;
+            break;
+        }
+    }
+
+    if (!templatePath) {
         fail(
-            `auth.js template is missing from the installed package (${templatePath}).`,
+            `auth.js template is missing from the installed package (looked for ${candidates.join(", ")}).`,
         );
     }
 

@@ -14,9 +14,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { runInit } from "../src/cli.ts";
 
-const TEMPLATE_PATH = fileURLToPath(
-    new URL("../templates/functions/auth.js", import.meta.url),
-);
+const TEMPLATE_PATH = fileURLToPath(new URL("../templates/auth.js", import.meta.url));
 
 const tempDirs: string[] = [];
 
@@ -184,11 +182,7 @@ describe("init — idempotency", () => {
 });
 
 describe("init — EdgeOne Pages", () => {
-    const EDGEONE_TEMPLATE_PATH = fileURLToPath(
-        new URL("../templates/edge-functions/auth.js", import.meta.url),
-    );
-
-    it("creates edge-functions/auth.js from the EdgeOne template", () => {
+    it("creates edge-functions/auth.js from the unified template", () => {
         const cwd = makeTempDir();
 
         runInit(["--platform", "edgeone"], cwd);
@@ -196,9 +190,40 @@ describe("init — EdgeOne Pages", () => {
         const target = join(cwd, "edge-functions", "auth.js");
         expect(existsSync(target)).toBe(true);
         expect(readFileSync(target, "utf-8")).toBe(
-            readFileSync(EDGEONE_TEMPLATE_PATH, "utf-8"),
+            readFileSync(TEMPLATE_PATH, "utf-8"),
         );
         expect(existsSync(join(cwd, "functions", "auth.js"))).toBe(false);
+    });
+
+    it("produces byte-identical files for both platforms (single template)", () => {
+        const cloudflareDir = makeTempDir();
+        const edgeoneDir = makeTempDir();
+
+        runInit([], cloudflareDir);
+        runInit(["--platform", "edgeone"], edgeoneDir);
+
+        const cloudflareAuth = readFileSync(
+            join(cloudflareDir, "functions", "auth.js"),
+            "utf-8",
+        );
+        const edgeoneAuth = readFileSync(
+            join(edgeoneDir, "edge-functions", "auth.js"),
+            "utf-8",
+        );
+
+        expect(cloudflareAuth).toBe(edgeoneAuth);
+    });
+
+    it("emits a self-contained template that auto-detects the platform", () => {
+        const code = readFileSync(TEMPLATE_PATH, "utf-8");
+
+        expect(code).not.toContain("import ");
+        expect(code).not.toContain("require(");
+        // Auto-detection is wired in (no per-platform pinned adapter).
+        expect(code).toContain('name: "auto"');
+        // The safe, fixed-origin token handover is present.
+        expect(code).toContain("postMessage(message, cmsOrigin)");
+        expect(code).not.toContain('postMessage(message, "*")');
     });
 
     it("accepts the --platform=edgeone syntax", () => {

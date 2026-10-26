@@ -8,10 +8,7 @@ import { describe, expect, it } from "vitest";
 // generated, hand-deployed artifacts:
 //   1. a token being posted to a wildcard (`"*"`) target origin, and
 //   2. the artifact ceasing to be self-contained (an `import`/`require`).
-const TEMPLATES = [
-    fileURLToPath(new URL("../templates/functions/auth.js", import.meta.url)),
-    fileURLToPath(new URL("../templates/edge-functions/auth.js", import.meta.url)),
-];
+const TEMPLATES = [fileURLToPath(new URL("../templates/auth.js", import.meta.url))];
 
 describe("generated auth templates", () => {
     for (const path of TEMPLATES) {

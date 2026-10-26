@@ -1,6 +1,6 @@
-// Sveltia CMS GitHub OAuth proxy for EdgeOne Pages.
+// Sveltia CMS GitHub OAuth proxy for Cloudflare Pages + EdgeOne Pages (auto-detected).
 // Generated from src/functions by `vp run build:templates` - do not edit.
-// Deploy as edge-functions/auth.js and configure GITHUB_CLIENT_ID,
+// Deploy as auth.js and configure GITHUB_CLIENT_ID,
 // GITHUB_CLIENT_SECRET, SITE_URL and ENVIRONMENT in the platform dashboard.
 //#region src/functions/context.ts
 /**
@@ -63,43 +63,14 @@ function resolveSiteOrigin(context, url, adapter) {
     return adapter.getEnv(context, "SITE_URL")?.trim() || url.origin;
 }
 //#endregion
-//#region src/functions/edgeone.ts
-function getEnv$1(context, key) {
-    const fromContext = readEnvValue(context.env, key);
-    if (fromContext !== void 0) return fromContext;
-    const globalEnv = globalThis.env;
-    const fromGlobal = readEnvValue(globalEnv, key);
-    if (fromGlobal !== void 0) return fromGlobal;
-    const processEnv = globalThis.process?.env;
-    return readEnvValue(processEnv, key);
-}
-function getClientIp$1(request) {
-    return request.eo?.clientIp?.trim() || "unknown";
-}
-function getOrigin$1(context, url) {
-    return resolveSiteOrigin(context, url, edgeoneAdapter);
-}
-/**
- * EdgeOne Pages adapter.
- *
- * Environment variables are read from `context.env` first and from the global
- * `env` object afterwards; the client IP comes from `request.eo.clientIp`.
- */
-var edgeoneAdapter = {
-    name: "edgeone",
-    getEnv: getEnv$1,
-    getClientIp: getClientIp$1,
-    getOrigin: getOrigin$1,
-};
-//#endregion
 //#region src/functions/cloudflare.ts
-function getEnv(context, key) {
+function getEnv$1(context, key) {
     return readEnvValue(context.env, key);
 }
-function getClientIp(request) {
+function getClientIp$1(request) {
     return request.headers.get("CF-Connecting-IP")?.trim() || "unknown";
 }
-function getOrigin(context, url) {
+function getOrigin$1(context, url) {
     return resolveSiteOrigin(context, url, cloudflareAdapter);
 }
 /**
@@ -108,7 +79,36 @@ function getOrigin(context, url) {
  * Environment variables come from `context.env`, the client IP from the
  * `CF-Connecting-IP` header that Cloudflare sets on every request.
  */
-var cloudflareAdapter = { name: "cloudflare", getEnv, getClientIp, getOrigin };
+var cloudflareAdapter = {
+    name: "cloudflare",
+    getEnv: getEnv$1,
+    getClientIp: getClientIp$1,
+    getOrigin: getOrigin$1,
+};
+//#endregion
+//#region src/functions/edgeone.ts
+function getEnv(context, key) {
+    const fromContext = readEnvValue(context.env, key);
+    if (fromContext !== void 0) return fromContext;
+    const globalEnv = globalThis.env;
+    const fromGlobal = readEnvValue(globalEnv, key);
+    if (fromGlobal !== void 0) return fromGlobal;
+    const processEnv = globalThis.process?.env;
+    return readEnvValue(processEnv, key);
+}
+function getClientIp(request) {
+    return request.eo?.clientIp?.trim() || "unknown";
+}
+function getOrigin(context, url) {
+    return resolveSiteOrigin(context, url, edgeoneAdapter);
+}
+/**
+ * EdgeOne Pages adapter.
+ *
+ * Environment variables are read from `context.env` first and from the global
+ * `env` object afterwards; the client IP comes from `request.eo.clientIp`.
+ */
+var edgeoneAdapter = { name: "edgeone", getEnv, getClientIp, getOrigin };
 //#endregion
 //#region src/functions/detect.ts
 /**
@@ -588,13 +588,15 @@ function createAuthHandler(options = {}) {
     };
 }
 //#endregion
-//#region src/functions/entries/edgeone.ts
-var handler = createAuthHandler({ adapter: edgeoneAdapter });
+//#region src/functions/entries/auto.ts
+var handler = createAuthHandler({ adapter: autoAdapter });
 /**
- * EdgeOne Pages edge function entry point.
+ * Auto-detecting edge function entry point.
  *
- * Deploy this file as `edge-functions/auth.js` in the project root; EdgeOne
- * routes `GET /auth` to it.
+ * Deploy this file as `functions/auth.js` (Cloudflare Pages) or
+ * `edge-functions/auth.js` (EdgeOne Pages). The runtime detects the platform
+ * per request, so a single artifact serves both; there is no need for two
+ * near-identical templates.
  */
 async function onRequest(context, env) {
     return handler(normalizeContext(context, env));

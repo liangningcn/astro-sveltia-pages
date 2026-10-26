@@ -17,16 +17,10 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 
 const TARGETS = [
     {
-        platform: "Cloudflare Pages",
-        entry: "src/functions/entries/cloudflare.ts",
-        outDir: "templates/functions",
-        target: "functions/auth.js",
-    },
-    {
-        platform: "EdgeOne Pages",
-        entry: "src/functions/entries/edgeone.ts",
-        outDir: "templates/edge-functions",
-        target: "edge-functions/auth.js",
+        platform: "Cloudflare Pages + EdgeOne Pages (auto-detected)",
+        entry: "src/functions/entries/auto.ts",
+        outDir: "templates",
+        target: "auth.js",
     },
 ];
 
