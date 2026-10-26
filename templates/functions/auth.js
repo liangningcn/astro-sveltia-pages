@@ -14,7 +14,8 @@ function readEnvValue(env, key) {
     const value = env[key];
     if (typeof value === "string") return value;
     if (value === void 0 || value === null) return;
-    return String(value);
+    if (typeof value === "boolean" || typeof value === "number") return String(value);
+    if (typeof value === "object" && value !== null) return JSON.stringify(value);
 }
 /**
  * Resolves the origin used for the OAuth `redirect_uri`.
@@ -362,14 +363,57 @@ function htmlResponse(html) {
     });
 }
 /**
+ * Escapes a value for safe embedding inside a `<script>` text node.
+ *
+ * `JSON.stringify` alone does not escape `<`, `>` or `&`, so a value
+ * containing them could break out of the script element. We additionally turn
+ * those into unicode escapes and neutralise the lone-surrogate line
+ * separators U+2028/U+2029 that would otherwise be a syntax error in a JS
+ * string literal.
+ */
+function escapeScriptString(value) {
+    return JSON.stringify(value).replace(/[<>&]/g, (char) => {
+        switch (char) {
+            case "<":
+                return "\\u003c";
+            case ">":
+                return "\\u003e";
+            default:
+                return "\\u0026";
+        }
+    });
+}
+/**
+ * Validates the `CMS_ORIGIN` the token is posted back to.
+ *
+ * Only `https` origins and plain-`http` `localhost` are accepted; a wildcard
+ * or any other scheme would let the token reach an attacker-controlled window.
+ * Returns the normalized origin (`proto://host[:port]`) or `null`.
+ */
+function parseCmsOrigin(value) {
+    if (!value) return null;
+    let url;
+    try {
+        url = new URL(value);
+    } catch {
+        return null;
+    }
+    const isHttps = url.protocol === "https:";
+    const isLocalhostHttp =
+        url.protocol === "http:" &&
+        (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+    if (!isHttps && !isLocalhostHttp) return null;
+    return url.origin;
+}
+/**
  * Builds the page that hands the token over to Sveltia CMS.
  *
- * The `postMessage` target origin is `*` on purpose: the CMS may be served
- * from another origin than the OAuth proxy (preview deployments, custom
- * domains). The CMS itself validates the origin of the message sender, so the
- * token never reaches a window that did not open the popup.
+ * The token is posted to a single, fixed `targetOrigin` (`CMS_ORIGIN`). It is
+ * never posted to `"*"`, so a window that did not open the popup (an attacker
+ * page) cannot receive it. The receiving CMS must still verify
+ * `event.origin` matches `CMS_ORIGIN` before trusting the message.
  */
-function successPage(token, origin) {
+function successPage(token, origin, cmsOrigin) {
     return `<!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -411,16 +455,16 @@ function successPage(token, origin) {
   </div>
   <script>
     (function () {
-      var token = ${JSON.stringify(token)};
-      var origin = ${JSON.stringify(origin)};
-      // The target origin is "*" on purpose: the CMS may run on another origin
-      // (preview deployment, custom domain) and the CMS validates the origin
-      // of the message sender itself.
+      var token = ${escapeScriptString(token)};
+      var origin = ${escapeScriptString(origin)};
+      var cmsOrigin = ${escapeScriptString(cmsOrigin)};
+      // The token is posted only to the configured CMS origin. The receiving
+      // CMS must still verify event.origin matches CMS_ORIGIN.
       var message = "authorization:github:success:" + JSON.stringify({ token: token });
 
       if (window.opener && window.opener !== window) {
         try {
-          window.opener.postMessage(message, "*");
+          window.opener.postMessage(message, cmsOrigin);
           setTimeout(function () {
             window.close();
           }, 1000);
@@ -468,19 +512,22 @@ function createAuthHandler(options = {}) {
     return async function handleAuth(context) {
         const request = context.request;
         const url = new URL(request.url);
+        const resolvedAdapter = adapter === "auto" ? detectAdapter(context) : adapter;
         if (request.method === "OPTIONS")
-            return preflightResponse(context, url, adapter);
-        const clientId = adapter.getEnv(context, "GITHUB_CLIENT_ID")?.trim();
-        const clientSecret = adapter.getEnv(context, "GITHUB_CLIENT_SECRET")?.trim();
+            return preflightResponse(context, url, resolvedAdapter);
+        const clientId = resolvedAdapter.getEnv(context, "GITHUB_CLIENT_ID")?.trim();
+        const clientSecret = resolvedAdapter
+            .getEnv(context, "GITHUB_CLIENT_SECRET")
+            ?.trim();
         if (!clientId || !clientSecret)
             return jsonResponse(
                 { error: "GitHub OAuth credentials not configured" },
                 500,
             );
-        const clientIp = adapter.getClientIp(request);
+        const clientIp = resolvedAdapter.getClientIp(request);
         if (limiter && !limiter.hit(clientIp, now()))
             return jsonResponse({ error: "Too many requests" }, 429);
-        const origin = adapter.getOrigin(context, url);
+        const origin = resolvedAdapter.getOrigin(context, url);
         const redirectUri = `${origin}/auth`;
         const code = url.searchParams.get("code");
         if (!code) {
@@ -523,7 +570,17 @@ function createAuthHandler(options = {}) {
                     { error: "GitHub did not return an access token" },
                     500,
                 );
-            return htmlResponse(successPage(token, origin));
+            const cmsOrigin = parseCmsOrigin(
+                resolvedAdapter.getEnv(context, "CMS_ORIGIN"),
+            );
+            if (!cmsOrigin)
+                return jsonResponse(
+                    {
+                        error: "CMS_ORIGIN is not configured or invalid (expected an https or localhost origin)",
+                    },
+                    500,
+                );
+            return htmlResponse(successPage(token, origin, cmsOrigin));
         } catch (error) {
             console.error("Auth error:", error);
             return jsonResponse({ error: "Authentication failed" }, 500);

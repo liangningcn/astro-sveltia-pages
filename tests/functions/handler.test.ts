@@ -111,11 +111,16 @@ describe.each(PLATFORMS)("createAuthHandler ($name)", ({ adapter, createContext 
         );
     });
 
-    it("exchanges the code and hands the token to the CMS", async () => {
+    it("exchanges the code and hands the token to the CMS with a fixed targetOrigin", async () => {
         const state = signState(CLIENT_SECRET, NOW);
         const context = createContext(
             `https://example.com/auth?code=oauth-code&state=${encodeURIComponent(state)}`,
-            { env: { SITE_URL: "https://example.com" } },
+            {
+                env: {
+                    SITE_URL: "https://example.com",
+                    CMS_ORIGIN: "https://cms.example.com",
+                },
+            },
         );
         const response = await handler(context);
         const html = await response.text();
@@ -123,7 +128,49 @@ describe.each(PLATFORMS)("createAuthHandler ($name)", ({ adapter, createContext 
         expect(response.status).toBe(200);
         expect(html).toContain("authorization:github:success:");
         expect(html).toContain("gho_token");
-        expect(html).toContain('postMessage(message, "*")');
+        // The token is posted to a fixed, configured origin (never "*").
+        expect(html).toContain('var cmsOrigin = "https://cms.example.com";');
+        expect(html).toContain("postMessage(message, cmsOrigin)");
+        expect(html).not.toContain('postMessage(message, "*")');
+    });
+
+    it("returns 500 when CMS_ORIGIN is missing", async () => {
+        const state = signState(CLIENT_SECRET, NOW);
+        const context = createContext(
+            `https://example.com/auth?code=oauth-code&state=${encodeURIComponent(state)}`,
+            { env: { SITE_URL: "https://example.com" } },
+        );
+        const response = await handler(context);
+
+        expect(response.status).toBe(500);
+        expect(await response.text()).not.toContain("postMessage");
+    });
+
+    it("returns 500 when CMS_ORIGIN is not https/localhost", async () => {
+        const state = signState(CLIENT_SECRET, NOW);
+        const context = createContext(
+            `https://example.com/auth?code=oauth-code&state=${encodeURIComponent(state)}`,
+            {
+                env: {
+                    SITE_URL: "https://example.com",
+                    CMS_ORIGIN: "http://evil.example.com",
+                },
+            },
+        );
+        const response = await handler(context);
+
+        expect(response.status).toBe(500);
+    });
+
+    it("rejects an unmarshalable CMS_ORIGIN", async () => {
+        const state = signState(CLIENT_SECRET, NOW);
+        const context = createContext(
+            `https://example.com/auth?code=oauth-code&state=${encodeURIComponent(state)}`,
+            { env: { SITE_URL: "https://example.com", CMS_ORIGIN: "not a url" } },
+        );
+        const response = await handler(context);
+
+        expect(response.status).toBe(500);
     });
 
     it("rejects a callback without a state", async () => {

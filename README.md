@@ -99,10 +99,17 @@ Cloudflare Pages and EdgeOne Pages.
     - `SITE_URL` (full origin of the production site, e.g. `https://example.com`; the auth
       function prefers it over the request origin so the OAuth origin stays consistent
       across custom domains, `*.pages.dev` preview domains and local `wrangler pages dev`)
+    - `CMS_ORIGIN` (**required since 0.3.0**) — the origin the token is posted back to,
+      e.g. `https://example.com`. Must be `https` (or `http://localhost` for local dev).
+      This is the only origin allowed as the `postMessage` target; the receiver must
+      still verify `event.origin === CMS_ORIGIN`.
 
 4. Redeploy. The CMS login button now uses GitHub OAuth; Sveltia receives the
    token via `authorization:github:success:` postMessage (with an
-   `#access_token=` fallback).
+   `#access_token=` fallback). The token is posted **only** to the configured
+   `CMS_ORIGIN` — never to `"*"` — so an attacker page that opens the auth popup
+   cannot receive it. The receiving CMS is still expected to verify
+   `event.origin` before trusting the message.
 
 The generated config uses `base_url: {siteUrl}` and `auth_endpoint: auth`,
 which is the route served by `functions/auth.js`.
@@ -134,6 +141,8 @@ configured in the EdgeOne dashboard.
     - `GITHUB_CLIENT_SECRET`
     - `ENVIRONMENT=production`
     - `SITE_URL` (full origin of the production site, e.g. `https://example.com`)
+    - `CMS_ORIGIN` (**required since 0.3.0**) — see the Cloudflare section for the
+      exact meaning; it is the only allowed `postMessage` target origin.
 
     The EdgeOne edge function reads them from the runtime `env` object, so
     they are injected by the platform — do not inline them into the bundle.
@@ -326,6 +335,20 @@ export const collections = {
 No special handling is required. When you open `/admin/` on `localhost`,
 Sveltia CMS offers a built-in **Local repository** preference (in the CMS UI)
 that switches saving to the local file system without OAuth.
+
+## Migrating from 0.2.x to 0.3.0
+
+Version 0.3.0 is a security and consistency release.
+
+| 0.2.x / 0.2.6                                             | 0.3.0                                                                                                                                                                                                                        |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Token posted to `window.opener` with `targetOrigin:"*"`   | Token is posted **only** to the configured `CMS_ORIGIN` (`https`/`localhost`). `CMS_ORIGIN` is now **required** — the auth endpoint returns `500` if it is missing or invalid. Re-run `astro-sveltia-pages init` and set it. |
+| EdgeOne client IP read from `x-forwarded-for` fallback    | EdgeOne now trusts only `request.eo.clientIp`; the `x-forwarded-for` fallback was removed (it could be spoofed, bypassing rate limiting).                                                                                    |
+| Two generated templates (`functions/`, `edge-functions/`) | A single self-contained `auth.js` is generated and copied to the right directory by `init --platform`.                                                                                                                       |
+| `astro-sveltia-pages/functions` exposed many internals    | Only stable APIs (`createAuthHandler`, `onRequest`, `signState`, `verifyState`) and a few public types are top-level exports; crypto/rate-limit/detect helpers moved to `astro-sveltia-pages/functions/internal`.            |
+
+After upgrading, re-run `pnpm exec astro-sveltia-pages init` to refresh the
+template and set `CMS_ORIGIN` in the platform dashboard.
 
 ## Migrating from 0.2.x to 0.2.6
 
