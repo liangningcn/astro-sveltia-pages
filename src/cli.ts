@@ -11,16 +11,51 @@ import { fileURLToPath } from "node:url";
 
 import { LOG_PREFIX } from "./options.js";
 
+/** Deployment platforms the OAuth proxy can be deployed to. */
+export type InitPlatform = "cloudflare" | "edgeone";
+
+type PlatformDescriptor = {
+    /** Human readable platform name. */
+    label: string;
+    /** Template path relative to the package root. */
+    template: string;
+    /** Directory the function is copied into, relative to the project root. */
+    dir: string;
+    /** Where the environment variables are configured. */
+    envHint: string;
+    /** Where the site URL can be found. */
+    siteHint: string;
+};
+
+const PLATFORMS: Record<InitPlatform, PlatformDescriptor> = {
+    cloudflare: {
+        label: "Cloudflare Pages",
+        template: "templates/functions/auth.js",
+        dir: "functions",
+        envHint: "the Cloudflare Pages dashboard (Settings -> Environment variables)",
+        siteHint: "the Cloudflare Pages dashboard",
+    },
+    edgeone: {
+        label: "EdgeOne Pages",
+        template: "templates/edge-functions/auth.js",
+        dir: "edge-functions",
+        envHint:
+            "the EdgeOne Pages dashboard (Project settings -> Environment variables)",
+        siteHint: "the EdgeOne Pages dashboard",
+    },
+};
+
+const DEFAULT_PLATFORM: InitPlatform = "cloudflare";
+
+const GITHUB_OAUTH_APPS_URL = "https://github.com/settings/developers";
+
 /**
- * Resolves the bundled auth.js template. In the published package it lives in
+ * Resolves a bundled template. In the published package it lives in
  * `dist/templates/` (next to this file); when running from source it is one
  * level up (`templates/`).
  */
-function resolveTemplatePath(): string {
-    for (const candidate of [
-        "./templates/functions/auth.js",
-        "../templates/functions/auth.js",
-    ]) {
+function resolveTemplatePath(relativePath: string): string {
+    for (const candidate of [`./${relativePath}`, `../${relativePath}`]) {
         const path = fileURLToPath(new URL(candidate, import.meta.url));
 
         if (existsSync(path)) {
@@ -28,66 +63,85 @@ function resolveTemplatePath(): string {
         }
     }
 
-    return fileURLToPath(new URL("./templates/functions/auth.js", import.meta.url));
+    return fileURLToPath(new URL(`./${relativePath}`, import.meta.url));
 }
 
-const TEMPLATE_PATH = resolveTemplatePath();
+function envEntries(platform: InitPlatform): { key: string; comment: string }[] {
+    const { envHint } = PLATFORMS[platform];
 
-const GITHUB_OAUTH_APPS_URL = "https://github.com/settings/developers";
-
-const ENV_ENTRIES = [
-    { key: "GITHUB_CLIENT_ID", comment: "# Get this from your GitHub OAuth App." },
-    {
-        key: "GITHUB_CLIENT_SECRET",
-        comment:
-            "# GITHUB_CLIENT_SECRET and ENVIRONMENT must be configured in the Cloudflare Pages\n" +
-            "# dashboard (Settings -> Environment variables). Do not commit real values.",
-    },
-    {
-        key: "ENVIRONMENT",
-        comment:
-            "# Set to `production` on production deploys (tightens the OAuth CORS origin).",
-    },
-    {
-        key: "SITE_URL",
-        comment:
-            "# Full origin of the production site, e.g. https://example.com. Configure it\n" +
-            "# in the Cloudflare Pages dashboard (used as the OAuth origin, keeping the\n" +
-            "# callback consistent across custom domains, *.pages.dev and local dev).",
-    },
-] as const;
+    return [
+        { key: "GITHUB_CLIENT_ID", comment: "# Get this from your GitHub OAuth App." },
+        {
+            key: "GITHUB_CLIENT_SECRET",
+            comment:
+                "# GITHUB_CLIENT_SECRET and ENVIRONMENT must be configured in\n" +
+                `# ${envHint}. Do not commit real values.`,
+        },
+        {
+            key: "ENVIRONMENT",
+            comment:
+                "# Set to `production` on production deploys (tightens the OAuth CORS origin).",
+        },
+        {
+            key: "SITE_URL",
+            comment:
+                "# Full origin of the production site, e.g. https://example.com. Configure it\n" +
+                `# in ${envHint} (used as the OAuth origin, keeping the\n` +
+                "# callback consistent across custom domains, preview domains and local dev).",
+        },
+    ];
+}
 
 function fail(message: string): never {
     console.error(`${LOG_PREFIX} init failed: ${message}`);
     process.exit(1);
 }
 
-function readSiteUrlFromArgs(args: string[]): string | undefined {
+function readArgValue(args: string[], name: string): string | undefined {
     for (let index = 0; index < args.length; index += 1) {
         const arg = args[index];
 
-        if (arg === "--site-url") {
+        if (arg === name) {
             return args[index + 1];
         }
 
-        if (arg?.startsWith("--site-url=")) {
-            return arg.slice("--site-url=".length);
+        if (arg?.startsWith(`${name}=`)) {
+            return arg.slice(name.length + 1);
         }
     }
 
     return undefined;
 }
 
+function readSiteUrlFromArgs(args: string[]): string | undefined {
+    return readArgValue(args, "--site-url");
+}
+
+function readPlatformFromArgs(args: string[]): InitPlatform {
+    const value = readArgValue(args, "--platform")?.trim().toLowerCase();
+
+    if (!value) {
+        return DEFAULT_PLATFORM;
+    }
+
+    if (value !== "cloudflare" && value !== "edgeone") {
+        fail(`unknown --platform "${value}" (expected "cloudflare" or "edgeone").`);
+    }
+
+    return value;
+}
+
 function hasEnvKey(content: string, key: string): boolean {
     return new RegExp(`^\\s*${key}=`, "m").test(content);
 }
 
-function appendEnvEntries(envExamplePath: string): void {
+function appendEnvEntries(envExamplePath: string, platform: InitPlatform): void {
     const existing = existsSync(envExamplePath)
         ? readFileSync(envExamplePath, "utf-8")
         : "";
+    const entries = envEntries(platform);
 
-    const missing = ENV_ENTRIES.filter((entry) => !hasEnvKey(existing, entry.key));
+    const missing = entries.filter((entry) => !hasEnvKey(existing, entry.key));
 
     if (missing.length === 0) {
         console.log(
@@ -108,13 +162,17 @@ function appendEnvEntries(envExamplePath: string): void {
     );
 }
 
-function copyAuthTemplate(functionsDir: string): void {
-    if (!existsSync(TEMPLATE_PATH)) {
+function copyAuthTemplate(platform: InitPlatform, cwd: string): void {
+    const descriptor = PLATFORMS[platform];
+    const templatePath = resolveTemplatePath(descriptor.template);
+
+    if (!existsSync(templatePath)) {
         fail(
-            `auth.js template is missing from the installed package (${TEMPLATE_PATH}).`,
+            `auth.js template is missing from the installed package (${templatePath}).`,
         );
     }
 
+    const functionsDir = join(cwd, descriptor.dir);
     const target = join(functionsDir, "auth.js");
 
     if (existsSync(target)) {
@@ -123,11 +181,12 @@ function copyAuthTemplate(functionsDir: string): void {
     }
 
     mkdirSync(functionsDir, { recursive: true });
-    copyFileSync(TEMPLATE_PATH, target);
+    copyFileSync(templatePath, target);
     console.log(`${LOG_PREFIX} Created ${target}.`);
 }
 
-function printGuidance(siteUrl: string | undefined): void {
+function printGuidance(platform: InitPlatform, siteUrl: string | undefined): void {
+    const descriptor = PLATFORMS[platform];
     const callbackUrl = siteUrl
         ? `${siteUrl.replace(/\/+$/, "")}/auth`
         : "<your-site-url>/auth";
@@ -137,8 +196,7 @@ ${LOG_PREFIX} Next steps:
 
 1. Create a GitHub OAuth App: ${GITHUB_OAUTH_APPS_URL}
    - Authorization callback URL: ${callbackUrl}
-2. Set the environment variables in the Cloudflare Pages dashboard
-   (Settings -> Environment variables):
+2. Set the environment variables in ${descriptor.envHint}:
    - GITHUB_CLIENT_ID
    - GITHUB_CLIENT_SECRET
    - ENVIRONMENT=production
@@ -150,7 +208,7 @@ ${LOG_PREFIX} Next steps:
         console.log(
             `${LOG_PREFIX} Your site URL can be found in either place:\n` +
                 `  - The "site" field in astro.config.mjs\n` +
-                `  - The custom domain shown in the Cloudflare Pages dashboard\n` +
+                `  - The custom domain shown in ${descriptor.siteHint}\n` +
                 `Re-run with --site-url <url> to print exact URLs next time.\n`,
         );
     }
@@ -158,11 +216,11 @@ ${LOG_PREFIX} Next steps:
 
 export function runInit(args: string[], cwd: string = process.cwd()): void {
     const siteUrl = readSiteUrlFromArgs(args);
-    const functionsDir = join(cwd, "functions");
+    const platform = readPlatformFromArgs(args);
 
-    copyAuthTemplate(functionsDir);
-    appendEnvEntries(join(cwd, ".env.example"));
-    printGuidance(siteUrl);
+    copyAuthTemplate(platform, cwd);
+    appendEnvEntries(join(cwd, ".env.example"), platform);
+    printGuidance(platform, siteUrl);
 }
 
 function isCliInvokedAsScript(): boolean {

@@ -10,6 +10,7 @@ import {
     buildCmsConfig,
 } from "./build-config.js";
 import { injectCollectionTypes, writeConfigToDisk } from "./codegen.js";
+import type { PlatformName } from "./functions/adapter.js";
 import { LOG_PREFIX, validateOptions, type SveltiaPagesOptions } from "./options.js";
 
 export type { BuildCmsConfigResult } from "./build-config.js";
@@ -39,6 +40,23 @@ function buildIndexHtml(appTitle: string, sveltiaVersion: string): string {
   </body>
 </html>
 `;
+}
+
+/** Human readable description of the deployment platform. */
+function describePlatform(platform: PlatformName | undefined): {
+    name: PlatformName;
+    label: string;
+    functionDir: string;
+} {
+    if (platform === "edgeone") {
+        return {
+            name: "edgeone",
+            label: "EdgeOne Pages",
+            functionDir: "edge-functions",
+        };
+    }
+
+    return { name: "cloudflare", label: "Cloudflare Pages", functionDir: "functions" };
 }
 
 /**
@@ -81,6 +99,7 @@ export default function sveltiaPages(options: SveltiaPagesOptions): AstroIntegra
 
     const appTitle = options.appTitle ?? DEFAULT_APP_TITLE;
     const sveltiaVersion = options.sveltiaVersion ?? DEFAULT_SVELTIA_VERSION;
+    const platform = describePlatform(options.platform);
     // Captured during `astro:config:setup` (when Astro's `site` is available)
     // and reused in `astro:build:done`, which has no config access.
     let cmsConfig: Record<string, unknown> | undefined;
@@ -127,7 +146,12 @@ export default function sveltiaPages(options: SveltiaPagesOptions): AstroIntegra
                     sveltiaVersion,
                     logger,
                 );
-                logger.info(`Sveltia CMS admin UI written to /${ADMIN_DIR}/.`);
+                logger.info(
+                    `Sveltia CMS admin UI written to /${ADMIN_DIR}/. ` +
+                        `Deploy the GitHub OAuth proxy to ${platform.label}: ` +
+                        `run "astro-sveltia-pages init --platform ${platform.name}" ` +
+                        `to create ${platform.functionDir}/auth.js.`,
+                );
             },
         },
     };

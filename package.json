@@ -1,13 +1,14 @@
 {
     "name": "astro-sveltia-pages",
-    "version": "0.2.5",
-    "description": "Generates /admin (index.html + config.yml) for Sveltia CMS, with Cloudflare R2 media support and a GitHub OAuth template for Cloudflare Pages.",
+    "version": "0.2.6",
+    "description": "Generates /admin (index.html + config.yml) for Sveltia CMS, with Cloudflare R2 media support and a GitHub OAuth template for Cloudflare Pages and EdgeOne Pages.",
     "keywords": [
         "astro-integration",
         "astro-loader",
         "sveltiacms",
         "withastro",
         "cloudflare-pages",
+        "edgeone-pages",
         "oauth"
     ],
     "homepage": "https://github.com/liangningcn/astro-sveltia-pages#readme",
@@ -34,13 +35,17 @@
     "exports": {
         ".": "./dist/index.mjs",
         "./loader": "./dist/loader.mjs",
+        "./functions": "./dist/functions/index.mjs",
+        "./functions/cloudflare": "./dist/functions/cloudflare.mjs",
+        "./functions/edgeone": "./dist/functions/edgeone.mjs",
         "./package.json": "./package.json"
     },
     "publishConfig": {
         "access": "public"
     },
     "scripts": {
-        "build": "vp pack",
+        "build": "vp run build:templates && vp pack",
+        "build:templates": "node scripts/build-templates.mjs",
         "dev": "vp pack --watch",
         "test": "vp test",
         "check": "vp check",

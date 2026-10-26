@@ -3,11 +3,11 @@
 > **Attribution**
 > This package is a fork of [`astro-loader-sveltia-cms`](https://github.com/joknoll/astro-loader-sveltia-cms) by Johannes Knoll, licensed under the MIT License.
 
-Sveltia CMS integration for Astro, optimized for Cloudflare Pages:
+Sveltia CMS integration for Astro, optimized for Cloudflare Pages and EdgeOne Pages:
 
 - Generates `/admin/index.html` and `/admin/config.yml` into the build output from a single options object — no hand-written CMS config.
 - Configures Sveltia's **external media library** for **Cloudflare R2** (validated, with the secret key never written to disk).
-- Ships a battle-tested **GitHub OAuth Cloudflare Pages Function** template plus an `init` command that wires it up.
+- Ships a battle-tested **GitHub OAuth edge function** for Cloudflare Pages (`functions/auth.js`) and EdgeOne Pages (`edge-functions/auth.js`), plus an `init` command that wires it up.
 - Includes a content loader (`astro-sveltia-pages/loader`) with automatic Zod schema generation.
 
 ## Quick Start
@@ -67,10 +67,15 @@ const posts = defineCollection({ loader: sveltiaLoader("posts") });
 export const collections = { posts };
 ```
 
-## Authentication (GitHub OAuth on Cloudflare Pages)
+## Authentication (GitHub OAuth)
 
 The package does not host OAuth endpoints itself. Instead it ships the exact
-Cloudflare Pages Function used in production by real deployments:
+edge function used in production by real deployments. The OAuth logic
+(state signing, token exchange, `postMessage` handover) is platform agnostic;
+only the runtime accessors differ, so the same implementation runs on
+Cloudflare Pages and EdgeOne Pages.
+
+### Cloudflare Pages
 
 1. Run the init command from your project root:
 
@@ -101,6 +106,112 @@ Cloudflare Pages Function used in production by real deployments:
 
 The generated config uses `base_url: {siteUrl}` and `auth_endpoint: auth`,
 which is the route served by `functions/auth.js`.
+
+### EdgeOne Pages
+
+The EdgeOne Pages deployment is the same flow with two differences: the
+function lives in `edge-functions/` and the environment variables are
+configured in the EdgeOne dashboard.
+
+1. Run the init command with the platform flag:
+
+    ```bash
+    pnpm exec astro-sveltia-pages init --platform edgeone --site-url https://example.com
+    ```
+
+    This copies the EdgeOne template to `edge-functions/auth.js` and writes
+    the same four variables to `.env.example`. The default platform is
+    `cloudflare`, so `--platform cloudflare` (or no flag) keeps the previous
+    behaviour.
+
+2. Create a GitHub OAuth App at <https://github.com/settings/developers> with
+   the authorization callback URL of the **EdgeOne domain**:
+   `https://{your-edgeone-domain}/auth`.
+
+3. Set the environment variables in the **EdgeOne Pages dashboard**
+   (Project settings → Environment variables):
+    - `GITHUB_CLIENT_ID`
+    - `GITHUB_CLIENT_SECRET`
+    - `ENVIRONMENT=production`
+    - `SITE_URL` (full origin of the production site, e.g. `https://example.com`)
+
+    The EdgeOne edge function reads them from the runtime `env` object, so
+    they are injected by the platform — do not inline them into the bundle.
+
+4. Build with the EdgeOne Astro adapter in `astro.config.mjs`:
+
+    ```js
+    import { defineConfig } from "astro/config";
+    import edgeone from "@edgeone/astro";
+    import sveltia from "astro-sveltia-pages";
+
+    export default defineConfig({
+        site: "https://example.com",
+        output: "server",
+        adapter: edgeone(),
+        integrations: [
+            sveltia({
+                repo: "my-org/my-site",
+                platform: "edgeone", // selects the EdgeOne guidance and template
+                collections: [
+                    /* ... */
+                ],
+            }),
+        ],
+    });
+    ```
+
+    `@edgeone/astro` renders the site through EdgeOne Pages; the OAuth
+    function stays a plain edge function in `edge-functions/auth.js`, so it is
+    deployed next to the site and not affected by the Astro adapter.
+
+5. Redeploy. The CMS login button uses GitHub OAuth exactly like on
+   Cloudflare Pages.
+
+#### Differences from the Cloudflare Pages deployment
+
+| Topic                 | Cloudflare Pages                           | EdgeOne Pages                                                     |
+| --------------------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| Function directory    | `functions/auth.js`                        | `edge-functions/auth.js`                                          |
+| Entry point           | `export async function onRequest(context)` | `export async function onRequest({ request, env })` (+ `default`) |
+| Environment variables | `context.env`                              | `context.env`, falling back to the global `env` object            |
+| Client IP             | `CF-Connecting-IP` header                  | `request.eo.clientIp`, falling back to `eo-client-ip`             |
+| Rate limiting         | per-isolate, in-memory, best effort        | per-isolate, in-memory, best effort                               |
+| Astro adapter         | `@astrojs/cloudflare`                      | `@edgeone/astro`                                                  |
+
+Both platforms rate-limit the auth endpoint **per isolate**: the counters live
+in the memory of the single isolate that serves the request, so the limit is
+best effort and resets when a request lands on another isolate. The client IP
+is used only as the rate-limit key — when a platform hides it, the adapter
+falls back to `unknown` and every such request shares one bucket.
+
+If the IP cannot be determined on EdgeOne, the limit therefore degrades to a
+global limit for those requests. Keep `ENVIRONMENT=production` so that the
+CORS preflight only answers your own origin.
+
+#### Using the runtime from your own function
+
+The platform adapters and the OAuth handler are exported by the package, so you
+can host the auth endpoint yourself:
+
+```js
+// functions/auth.js (Cloudflare Pages)
+import { onRequest } from "astro-sveltia-pages/functions/cloudflare";
+
+export { onRequest };
+```
+
+```js
+// edge-functions/auth.js (EdgeOne Pages)
+import { onRequest } from "astro-sveltia-pages/functions/edgeone";
+
+export { onRequest };
+```
+
+`astro-sveltia-pages/functions` additionally exports `createAuthHandler()`,
+`signState()`, `verifyState()` and the adapters themselves. Pass
+`platform: "cloudflare" | "edgeone" | "auto"` to pin or auto-detect the
+platform per request.
 
 ## Cloudflare R2 Media Storage
 
@@ -147,21 +258,22 @@ following for `/admin/*` (the package does **not** generate headers):
 
 ## Options Reference
 
-| Option           | Type                  | Default           | Description                                                                                                                         |
-| ---------------- | --------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `repo`           | `string`              | —                 | GitHub repository, `owner/name`. Required.                                                                                          |
-| `branch`         | `string`              | `"main"`          | Branch CMS changes are committed to.                                                                                                |
-| `siteUrl`        | `string`              | Astro `site`      | Origin used as CMS `base_url`. Build fails when neither is set.                                                                     |
-| `collections`    | `SveltiaCollection[]` | —                 | Mapped 1:1 into the CMS config. Required.                                                                                           |
-| `r2`             | `object`              | —                 | Cloudflare R2 external media library (see above).                                                                                   |
-| `mediaFolder`    | `string`              | `"public/images"` | CMS `media_folder`.                                                                                                                 |
-| `publicFolder`   | `string`              | `"/images"`       | CMS `public_folder`.                                                                                                                |
-| `locale`         | `string`              | `"zh"`            | CMS UI language.                                                                                                                    |
-| `appTitle`       | `string`              | `"Sveltia CMS"`   | Browser tab / login page title.                                                                                                     |
-| `logo`           | `{ src, ... }`        | —                 | CMS logo, forwarded as `logo`.                                                                                                      |
-| `backendName`    | `string`              | `"github"`        | Git backend name.                                                                                                                   |
-| `sveltiaVersion` | `string`              | `"latest"`        | Sveltia version loaded from unpkg (`@latest` by default).                                                                           |
-| `extraConfig`    | `object`              | —                 | Escape hatch, shallowly merged into the generated config. Colliding keys override the generated value and emit one warning per key. |
+| Option           | Type                        | Default           | Description                                                                                                                          |
+| ---------------- | --------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `repo`           | `string`                    | —                 | GitHub repository, `owner/name`. Required.                                                                                           |
+| `branch`         | `string`                    | `"main"`          | Branch CMS changes are committed to.                                                                                                 |
+| `siteUrl`        | `string`                    | Astro `site`      | Origin used as CMS `base_url`. Build fails when neither is set.                                                                      |
+| `collections`    | `SveltiaCollection[]`       | —                 | Mapped 1:1 into the CMS config. Required.                                                                                            |
+| `r2`             | `object`                    | —                 | Cloudflare R2 external media library (see above).                                                                                    |
+| `mediaFolder`    | `string`                    | `"public/images"` | CMS `media_folder`.                                                                                                                  |
+| `publicFolder`   | `string`                    | `"/images"`       | CMS `public_folder`.                                                                                                                 |
+| `locale`         | `string`                    | `"zh"`            | CMS UI language.                                                                                                                     |
+| `appTitle`       | `string`                    | `"Sveltia CMS"`   | Browser tab / login page title.                                                                                                      |
+| `logo`           | `{ src, ... }`              | —                 | CMS logo, forwarded as `logo`.                                                                                                       |
+| `backendName`    | `string`                    | `"github"`        | Git backend name.                                                                                                                    |
+| `sveltiaVersion` | `string`                    | `"latest"`        | Sveltia version loaded from unpkg (`@latest` by default).                                                                            |
+| `extraConfig`    | `object`                    | —                 | Escape hatch, shallowly merged into the generated config. Colliding keys override the generated value and emit one warning per key.  |
+| `platform`       | `"cloudflare" \| "edgeone"` | `"cloudflare"`    | Deployment platform of the OAuth proxy. Selects the function template and the dashboard the environment variables are configured in. |
 
 `collections` entries require `name`, `folder` and `fields`; every other
 Sveltia collection option (`create`, `slug`, `i18n`, collection-level
@@ -215,6 +327,24 @@ No special handling is required. When you open `/admin/` on `localhost`,
 Sveltia CMS offers a built-in **Local repository** preference (in the CMS UI)
 that switches saving to the local file system without OAuth.
 
+## Migrating from 0.2.x to 0.2.6
+
+Version 0.2.6 adds EdgeOne Pages support and splits the OAuth runtime into a
+platform adapter layer.
+
+| 0.2.x                                      | 0.2.6                                                                                                                                                                       |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `functions/auth.js` (hand-maintained copy) | Still the Cloudflare entry point, but generated from `src/functions` by `vp run build:templates`. Run `pnpm exec astro-sveltia-pages init` again to refresh it.             |
+| —                                          | New: `edge-functions/auth.js` for EdgeOne Pages, created by `astro-sveltia-pages init --platform edgeone`.                                                                  |
+| —                                          | New: `platform` option (`"cloudflare"` \| `"edgeone"`) and `astro-sveltia-pages/functions*` exports.                                                                        |
+| CSRF `state` was a random value            | The state is now `timestamp.HMAC-SHA256(timestamp, clientSecret)` with a 10 minute TTL, verified with a timing-safe comparison. The OAuth App callback URL does not change. |
+| No rate limiting                           | The auth endpoint is rate limited per client IP (30 requests per minute per isolate).                                                                                       |
+
+Existing Cloudflare deployments keep working: the callback URL stays
+`{siteUrl}/auth` and the environment variables are unchanged. Copy the new
+template over `functions/auth.js` to pick up the signed state and the rate
+limit.
+
 ## Migrating from 0.2.x to 0.2.5
 
 Version 0.2.5 removes the built-in OAuth routes and the injected admin page in
@@ -252,6 +382,10 @@ vp check
 vp test
 vp pack
 ```
+
+`vp run build:templates` regenerates the deployable function templates
+(`templates/functions/auth.js` and `templates/edge-functions/auth.js`) from
+`src/functions`; `vp run build` runs it before packaging.
 
 Use `vp run format` to format code and `vp run format:check` to verify formatting.
 See [Code style](docs/code-style.md) for the formatter profile and unsupported rules.

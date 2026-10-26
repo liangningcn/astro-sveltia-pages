@@ -182,3 +182,80 @@ describe("init — idempotency", () => {
         }
     });
 });
+
+describe("init — EdgeOne Pages", () => {
+    const EDGEONE_TEMPLATE_PATH = fileURLToPath(
+        new URL("../templates/edge-functions/auth.js", import.meta.url),
+    );
+
+    it("creates edge-functions/auth.js from the EdgeOne template", () => {
+        const cwd = makeTempDir();
+
+        runInit(["--platform", "edgeone"], cwd);
+
+        const target = join(cwd, "edge-functions", "auth.js");
+        expect(existsSync(target)).toBe(true);
+        expect(readFileSync(target, "utf-8")).toBe(
+            readFileSync(EDGEONE_TEMPLATE_PATH, "utf-8"),
+        );
+        expect(existsSync(join(cwd, "functions", "auth.js"))).toBe(false);
+    });
+
+    it("accepts the --platform=edgeone syntax", () => {
+        const cwd = makeTempDir();
+
+        runInit(["--platform=edgeone"], cwd);
+
+        expect(existsSync(join(cwd, "edge-functions", "auth.js"))).toBe(true);
+    });
+
+    it("documents the EdgeOne dashboard in .env.example", () => {
+        const cwd = makeTempDir();
+
+        runInit(["--platform", "edgeone"], cwd);
+
+        const content = readFileSync(join(cwd, ".env.example"), "utf-8");
+        expect(content).toContain("EdgeOne Pages");
+        expect(content).not.toContain("Cloudflare Pages");
+        expect(content).toMatch(/^GITHUB_CLIENT_ID=$/m);
+        expect(content).toMatch(/^SITE_URL=$/m);
+    });
+
+    it("prints the EdgeOne guidance", () => {
+        const cwd = makeTempDir();
+        const console_ = captureConsole();
+
+        try {
+            runInit(
+                ["--platform", "edgeone", "--site-url", "https://example.com"],
+                cwd,
+            );
+
+            const output = console_.log.join("\n");
+            expect(output).toContain("EdgeOne Pages");
+            expect(output).toContain("https://example.com/auth");
+        } finally {
+            console_.restore();
+        }
+    });
+
+    it("rejects an unknown platform", () => {
+        const cwd = makeTempDir();
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code: number,
+        ) => {
+            throw new Error(`process.exit(${String(code)})`);
+        }) as never);
+        const console_ = captureConsole();
+
+        try {
+            expect(() => runInit(["--platform", "vercel"], cwd)).toThrow(
+                /process\.exit\(1\)/,
+            );
+            expect(console_.error.join("\n")).toContain("unknown --platform");
+        } finally {
+            console_.restore();
+            exitSpy.mockRestore();
+        }
+    });
+});

@@ -1,5 +1,7 @@
 import type { CmsConfig } from "@sveltia/cms";
 
+import type { PlatformName } from "./functions/adapter.js";
+
 export const LOG_PREFIX = "[astro-sveltia-pages]";
 
 /**
@@ -61,6 +63,12 @@ export type SveltiaPagesOptions = {
      * collide with generated values override them and emit a warning per key.
      */
     extraConfig?: Record<string, unknown>;
+    /**
+     * Deployment platform of the GitHub OAuth proxy: `cloudflare` (default)
+     * or `edgeone`. It selects the function template and the dashboard the
+     * environment variables are configured in.
+     */
+    platform?: PlatformName;
 };
 
 function fail(message: string): never {
@@ -150,6 +158,16 @@ export function validateOptions(options: SveltiaPagesOptions): void {
 
     if (options.extraConfig !== undefined && typeof options.extraConfig !== "object") {
         fail('"extraConfig" must be an object.');
+    }
+
+    if (
+        options.platform !== undefined &&
+        options.platform !== "cloudflare" &&
+        options.platform !== "edgeone"
+    ) {
+        fail(
+            `"platform" must be "cloudflare" or "edgeone" (got ${JSON.stringify(options.platform)}).`,
+        );
     }
 }
 
