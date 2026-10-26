@@ -1,6 +1,6 @@
 {
     "name": "astro-sveltia-pages",
-    "version": "0.2.6",
+    "version": "0.3.0",
     "description": "Generates /admin (index.html + config.yml) for Sveltia CMS, with Cloudflare R2 media support and a GitHub OAuth template for Cloudflare Pages and EdgeOne Pages.",
     "keywords": [
         "astro-integration",
