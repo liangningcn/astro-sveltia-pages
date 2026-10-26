@@ -46,6 +46,7 @@
     "scripts": {
         "build": "vp run build:templates && vp pack",
         "build:templates": "node scripts/build-templates.mjs",
+        "check:templates": "node scripts/build-templates.mjs && git diff --exit-code -- templates/",
         "dev": "vp pack --watch",
         "test": "vp test",
         "check": "vp check",

@@ -1,0 +1,4 @@
+# Keep generated templates at LF so the `check:templates` gate is stable across
+# platforms (the build script emits LF; autocrlf would otherwise make the gate
+# always report a diff).
+templates/** text eol=lf
