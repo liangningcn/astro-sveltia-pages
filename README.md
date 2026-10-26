@@ -1,5 +1,7 @@
 # astro-sveltia-pages
 
+[中文文档](README.zh-CN.md) | English
+
 > **Attribution**
 > This package is a fork of [`astro-loader-sveltia-cms`](https://github.com/joknoll/astro-loader-sveltia-cms) by Johannes Knoll, licensed under the MIT License.
 
