@@ -36,6 +36,7 @@
         ".": "./dist/index.mjs",
         "./loader": "./dist/loader.mjs",
         "./functions": "./dist/functions/index.mjs",
+        "./functions/internal": "./dist/functions/internal.mjs",
         "./functions/cloudflare": "./dist/functions/cloudflare.mjs",
         "./functions/edgeone": "./dist/functions/edgeone.mjs",
         "./package.json": "./package.json"

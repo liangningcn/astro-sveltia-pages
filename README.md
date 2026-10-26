@@ -217,10 +217,17 @@ import { onRequest } from "astro-sveltia-pages/functions/edgeone";
 export { onRequest };
 ```
 
-`astro-sveltia-pages/functions` additionally exports `createAuthHandler()`,
-`signState()`, `verifyState()` and the adapters themselves. Pass
-`platform: "cloudflare" | "edgeone" | "auto"` to pin or auto-detect the
-platform per request.
+`astro-sveltia-pages/functions` (stable API) exports `createAuthHandler()`,
+`signState()`, `verifyState()` and the `PlatformAdapter` types. Pass
+`platform: "cloudflare" | "edgeone" | "auto"` to pin or auto-detect the platform
+per request.
+
+The lower-level pieces — the platform adapters (`cloudflareAdapter`,
+`edgeoneAdapter`, `autoAdapter`, `detectAdapter`), the crypto helpers
+(`hmacSha256Hex`, `timingSafeEqual`), `createRateLimiter()` and
+`normalizeContext()` — live in `astro-sveltia-pages/functions/internal`. They are
+**not** part of the stable API and may change in any release; only import them if
+you need to build a custom adapter or handler.
 
 ## Cloudflare R2 Media Storage
 

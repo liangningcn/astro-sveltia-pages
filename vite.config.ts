@@ -12,6 +12,7 @@ export default defineConfig({
             loader: "./src/loader.ts",
             cli: "./src/cli.ts",
             "functions/index": "./src/functions/index.ts",
+            "functions/internal": "./src/functions/internal.ts",
             "functions/cloudflare": "./src/functions/entries/cloudflare.ts",
             "functions/edgeone": "./src/functions/entries/edgeone.ts",
         },
