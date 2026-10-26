@@ -151,24 +151,33 @@ function adapterFor(platform) {
 //#region src/functions/rate-limit.ts
 /** Default limit: 30 requests per minute per client IP. */
 var DEFAULT_RATE_LIMIT = { limit: 30, windowMs: 60 * 1e3 };
+/** Hard cap on distinct tracked clients per isolate. */
+var MAX_TRACKED_CLIENTS = 4096;
 /**
- * Evicts the soonest-to-expire bucket while the map is over the cap.
+ * Evicts buckets while the map is over the cap.
  *
  * Without this bound an attacker that rotates the key every request (e.g. a
- * spoofed client IP) would grow the map without limit. Evicting the bucket
- * that expires first keeps memory bounded while least affecting active
- * clients.
+ * spoofed client IP) would grow the map without limit.
+ *
+ * Expired buckets (now >= resetAt) are reclaimed first: they carry no useful
+ * state and are the cheapest to drop. Only if the map is still over the cap do
+ * we evict live buckets, always dropping the one that expires soonest so
+ * active clients are affected least.
  */
 function enforceCap(hits, now) {
     if (hits.size <= 4096) return;
-    let oldestKey = null;
-    let oldestReset = Number.POSITIVE_INFINITY;
-    for (const [key, entry] of hits)
-        if (entry.resetAt < oldestReset) {
-            oldestReset = entry.resetAt;
-            oldestKey = key;
-        }
-    if (oldestKey !== null) hits.delete(oldestKey);
+    for (const [key, entry] of hits) if (now >= entry.resetAt) hits.delete(key);
+    while (hits.size > MAX_TRACKED_CLIENTS) {
+        let oldestKey = null;
+        let oldestReset = Number.POSITIVE_INFINITY;
+        for (const [key, entry] of hits)
+            if (entry.resetAt < oldestReset) {
+                oldestReset = entry.resetAt;
+                oldestKey = key;
+            }
+        if (oldestKey === null) break;
+        hits.delete(oldestKey);
+    }
 }
 function createRateLimiter(options) {
     const hits = /* @__PURE__ */ new Map();
