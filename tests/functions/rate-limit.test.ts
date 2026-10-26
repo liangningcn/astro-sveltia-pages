@@ -67,4 +67,39 @@ describe("createRateLimiter", () => {
 
         expect(limiter.hit("ip")).toBe(true);
     });
+
+    it("keeps size bounded under constantly rotating fresh keys", () => {
+        const limiter = createRateLimiter({ limit: 1, windowMs: 1_000_000 });
+
+        let now = 0;
+        for (let i = 0; i < MAX_TRACKED_CLIENTS + 500; i += 1) {
+            limiter.hit(`client-${i}`, now);
+            // Advance time so every new bucket stays far from expiry and the
+            // cap is enforced purely by evicting the soonest-to-expire bucket.
+            now += 1000;
+        }
+
+        expect(limiter.size).toBeLessThanOrEqual(MAX_TRACKED_CLIENTS);
+    });
+
+    it("evicts expired buckets before live ones in enforceCap", () => {
+        const limiter = createRateLimiter({ limit: 1_000_000, windowMs: 1000 });
+
+        // A single live bucket that expires far in the future.
+        limiter.hit("live", 5000);
+
+        // Fill the rest with already-expired buckets (resetAt in the past).
+        for (let i = 0; i < MAX_TRACKED_CLIENTS - 1; i += 1) {
+            limiter.hit(`expired-${i}`, 0);
+        }
+
+        // A brand-new hit at t=5000 triggers enforceCap while over the cap.
+        limiter.hit("new", 5000);
+
+        // Expired buckets are dropped first, so the map shrinks well below the
+        // cap and the live bucket survives.
+        expect(limiter.size).toBeLessThanOrEqual(MAX_TRACKED_CLIENTS);
+        expect(limiter.size).toBe(2);
+        expect(limiter.hit("live", 5000)).toBe(true);
+    });
 });

@@ -30,12 +30,15 @@ export type RateLimiter = {
 };
 
 /**
- * Evicts the soonest-to-expire bucket while the map is over the cap.
+ * Evicts buckets while the map is over the cap.
  *
  * Without this bound an attacker that rotates the key every request (e.g. a
- * spoofed client IP) would grow the map without limit. Evicting the bucket
- * that expires first keeps memory bounded while least affecting active
- * clients.
+ * spoofed client IP) would grow the map without limit.
+ *
+ * Expired buckets (now >= resetAt) are reclaimed first: they carry no useful
+ * state and are the cheapest to drop. Only if the map is still over the cap do
+ * we evict live buckets, always dropping the one that expires soonest so
+ * active clients are affected least.
  */
 function enforceCap(
     hits: Map<string, { count: number; resetAt: number }>,
@@ -45,17 +48,29 @@ function enforceCap(
         return;
     }
 
-    let oldestKey: string | null = null;
-    let oldestReset = Number.POSITIVE_INFINITY;
-
+    // Pass 1: expired buckets are reclaimed before any live one.
     for (const [key, entry] of hits) {
-        if (entry.resetAt < oldestReset) {
-            oldestReset = entry.resetAt;
-            oldestKey = key;
+        if (now >= entry.resetAt) {
+            hits.delete(key);
         }
     }
 
-    if (oldestKey !== null) {
+    // Pass 2: while still over the cap, evict the soonest-to-expire live bucket.
+    while (hits.size > MAX_TRACKED_CLIENTS) {
+        let oldestKey: string | null = null;
+        let oldestReset = Number.POSITIVE_INFINITY;
+
+        for (const [key, entry] of hits) {
+            if (entry.resetAt < oldestReset) {
+                oldestReset = entry.resetAt;
+                oldestKey = key;
+            }
+        }
+
+        if (oldestKey === null) {
+            break;
+        }
+
         hits.delete(oldestKey);
     }
 }
