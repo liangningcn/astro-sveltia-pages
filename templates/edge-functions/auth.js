@@ -74,13 +74,7 @@ function getEnv$1(context, key) {
     return readEnvValue(processEnv, key);
 }
 function getClientIp$1(request) {
-    const clientIp = request.eo?.clientIp?.trim();
-    if (clientIp) return clientIp;
-    return (
-        request.headers.get("eo-client-ip")?.trim() ||
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-        "unknown"
-    );
+    return request.eo?.clientIp?.trim() || "unknown";
 }
 function getOrigin$1(context, url) {
     return resolveSiteOrigin(context, url, edgeoneAdapter);

@@ -93,20 +93,30 @@ describe("edgeoneAdapter", () => {
         expect(edgeoneAdapter.getClientIp(request)).toBe("203.0.113.42");
     });
 
-    it("falls back to the eo-client-ip header", () => {
+    it("ignores the eo-client-ip header (only request.eo.clientIp is trusted)", () => {
         const request = createRequest("https://example.com/auth", {
             "eo-client-ip": "203.0.113.43",
         });
 
-        expect(edgeoneAdapter.getClientIp(request)).toBe("203.0.113.43");
+        expect(edgeoneAdapter.getClientIp(request)).toBe(UNKNOWN_CLIENT_IP);
     });
 
-    it("falls back to the first x-forwarded-for address", () => {
+    it("ignores x-forwarded-for (must not be used as the rate-limit key)", () => {
         const request = createRequest("https://example.com/auth", {
             "x-forwarded-for": "203.0.113.44, 70.41.3.18",
         });
 
-        expect(edgeoneAdapter.getClientIp(request)).toBe("203.0.113.44");
+        expect(edgeoneAdapter.getClientIp(request)).toBe(UNKNOWN_CLIENT_IP);
+    });
+
+    it("prefers request.eo.clientIp even when a forged x-forwarded-for is set", () => {
+        const request = createRequest(
+            "https://example.com/auth",
+            { "x-forwarded-for": "203.0.113.44, 70.41.3.18" },
+            { eo: { clientIp: "203.0.113.42" } },
+        );
+
+        expect(edgeoneAdapter.getClientIp(request)).toBe("203.0.113.42");
     });
 
     it("falls back to unknown when the IP is not exposed", () => {

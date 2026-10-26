@@ -179,14 +179,14 @@ configured in the EdgeOne dashboard.
 
 #### Differences from the Cloudflare Pages deployment
 
-| Topic                 | Cloudflare Pages                           | EdgeOne Pages                                                     |
-| --------------------- | ------------------------------------------ | ----------------------------------------------------------------- |
-| Function directory    | `functions/auth.js`                        | `edge-functions/auth.js`                                          |
-| Entry point           | `export async function onRequest(context)` | `export async function onRequest({ request, env })` (+ `default`) |
-| Environment variables | `context.env`                              | `context.env`, falling back to the global `env` object            |
-| Client IP             | `CF-Connecting-IP` header                  | `request.eo.clientIp`, falling back to `eo-client-ip`             |
-| Rate limiting         | per-isolate, in-memory, best effort        | per-isolate, in-memory, best effort                               |
-| Astro adapter         | `@astrojs/cloudflare`                      | `@edgeone/astro`                                                  |
+| Topic                 | Cloudflare Pages                           | EdgeOne Pages                                                        |
+| --------------------- | ------------------------------------------ | -------------------------------------------------------------------- |
+| Function directory    | `functions/auth.js`                        | `edge-functions/auth.js`                                             |
+| Entry point           | `export async function onRequest(context)` | `export async function onRequest({ request, env })` (+ `default`)    |
+| Environment variables | `context.env`                              | `context.env`, falling back to the global `env` object               |
+| Client IP             | `CF-Connecting-IP` header                  | `request.eo.clientIp` only (no header fallback; unknown when absent) |
+| Rate limiting         | per-isolate, in-memory, best effort        | per-isolate, in-memory, best effort                                  |
+| Astro adapter         | `@astrojs/cloudflare`                      | `@edgeone/astro`                                                     |
 
 Both platforms rate-limit the auth endpoint **per isolate**: the counters live
 in the memory of the single isolate that serves the request, so the limit is

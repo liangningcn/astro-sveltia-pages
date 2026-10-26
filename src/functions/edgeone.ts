@@ -34,18 +34,14 @@ function getEnv(context: PlatformContext, key: string): string | undefined {
 }
 
 function getClientIp(request: Request): string {
+    // Only the runtime-provided `request.eo.clientIp` is trusted. Header-based
+    // fallbacks (`eo-client-ip`, `x-forwarded-for`) are deliberately NOT used:
+    // they can be forged by the client, which would let an attacker rotate the
+    // rate-limit key and bypass the per-IP limit. When the runtime does not
+    // expose the IP we fall back to "unknown" and share one bucket for it.
     const clientIp = (request as EdgeOneRequest).eo?.clientIp?.trim();
 
-    if (clientIp) {
-        return clientIp;
-    }
-
-    // Fallback for runtimes that only forward the IP as a header.
-    const header =
-        request.headers.get("eo-client-ip")?.trim() ||
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-
-    return header || UNKNOWN_CLIENT_IP;
+    return clientIp || UNKNOWN_CLIENT_IP;
 }
 
 function getOrigin(context: PlatformContext, url: URL): string {
