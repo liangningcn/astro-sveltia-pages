@@ -151,26 +151,33 @@ function adapterFor(platform) {
 //#region src/functions/rate-limit.ts
 /** Default limit: 30 requests per minute per client IP. */
 var DEFAULT_RATE_LIMIT = { limit: 30, windowMs: 60 * 1e3 };
-var MAX_TRACKED_CLIENTS = 4096;
 /**
- * Creates a per-isolate rate limiter.
+ * Evicts the soonest-to-expire bucket while the map is over the cap.
  *
- * The counters live in the memory of the isolate that serves the request, so
- * the limit is best effort: it protects a single instance, not the whole
- * deployment. Every edge platform spreads traffic over many isolates.
+ * Without this bound an attacker that rotates the key every request (e.g. a
+ * spoofed client IP) would grow the map without limit. Evicting the bucket
+ * that expires first keeps memory bounded while least affecting active
+ * clients.
  */
+function enforceCap(hits, now) {
+    if (hits.size <= 4096) return;
+    let oldestKey = null;
+    let oldestReset = Number.POSITIVE_INFINITY;
+    for (const [key, entry] of hits)
+        if (entry.resetAt < oldestReset) {
+            oldestReset = entry.resetAt;
+            oldestKey = key;
+        }
+    if (oldestKey !== null) hits.delete(oldestKey);
+}
 function createRateLimiter(options) {
     const hits = /* @__PURE__ */ new Map();
-    function prune(now) {
-        if (hits.size <= MAX_TRACKED_CLIENTS) return;
-        for (const [key, entry] of hits) if (now >= entry.resetAt) hits.delete(key);
-    }
     return {
         hit(key, now = Date.now()) {
             const entry = hits.get(key);
             if (!entry || now >= entry.resetAt) {
                 hits.set(key, { count: 1, resetAt: now + options.windowMs });
-                prune(now);
+                enforceCap(hits, now);
                 return true;
             }
             entry.count += 1;
