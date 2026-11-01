@@ -106,7 +106,6 @@ describe("validateOptions — scalars", () => {
                 ...validOptions,
                 branch: "main",
                 siteUrl: "https://example.com",
-                locale: "en",
                 appTitle: "CMS",
                 logo: { src: "/logo.svg" },
                 backendName: "github",

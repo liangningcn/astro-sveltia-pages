@@ -4,10 +4,37 @@ import { LOG_PREFIX, type SveltiaPagesOptions } from "./options.js";
 
 export const DEFAULT_MEDIA_FOLDER = "public/images";
 export const DEFAULT_PUBLIC_FOLDER = "/images";
-export const DEFAULT_LOCALE = "zh";
 export const DEFAULT_APP_TITLE = "Sveltia CMS";
 export const DEFAULT_BACKEND_NAME = "github";
-export const DEFAULT_SVELTIA_VERSION = "latest";
+/**
+ * Pinned Sveltia CMS version loaded from unpkg. Kept in sync with the
+ * `@sveltia/cms` type dependency so the runtime UI and build-time types never
+ * drift. Previously `"latest"`, which pulled untested releases at build time
+ * and was not reproducible.
+ */
+export const DEFAULT_SVELTIA_VERSION = "0.256.1";
+
+/**
+ * Maps first-class integration options to their canonical Sveltia config keys.
+ * These were previously only reachable via the `extraConfig` escape hatch.
+ */
+export const PROMOTED_OPTIONS: ReadonlyArray<
+    readonly [keyof SveltiaPagesOptions, string]
+> = [
+    ["singletons", "singletons"],
+    ["assetCollections", "asset_collections"],
+    ["i18n", "i18n"],
+    ["readonly", "readonly"],
+    ["showPreviewLinks", "show_preview_links"],
+    ["displayUrl", "display_url"],
+    ["logoutRedirectUrl", "logout_redirect_url"],
+    ["editor", "editor"],
+    ["publishMode", "publish_mode"],
+    ["fieldDefaults", "field_defaults"],
+    ["output", "output"],
+    ["slug", "slug"],
+    ["logoUrl", "logo_url"],
+];
 
 export type BuildCmsConfigResult = {
     /** The generated CMS configuration. */
@@ -93,7 +120,6 @@ export function buildCmsConfig(
         };
     }
 
-    config.locale = options.locale ?? DEFAULT_LOCALE;
     config.site_url = siteUrl;
     config.app_title = options.appTitle ?? DEFAULT_APP_TITLE;
 
@@ -102,6 +128,16 @@ export function buildCmsConfig(
     }
 
     config.collections = options.collections;
+
+    // Promoted first-class global options (official Sveltia CmsConfig keys).
+    // Each is emitted only when set; `extraConfig` can still override them
+    // (with a warning) exactly as before.
+    for (const [optKey, configKey] of PROMOTED_OPTIONS) {
+        const value = (options as Record<string, unknown>)[optKey];
+        if (value !== undefined) {
+            config[configKey] = value;
+        }
+    }
 
     const generatedKeys = new Set(Object.keys(config));
     const extraConfig = options.extraConfig;

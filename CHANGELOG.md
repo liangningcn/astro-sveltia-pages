@@ -3,10 +3,54 @@
 All notable changes to this project are documented here. The project follows
 [Semantic Versioning](https://semver.org/).
 
+中文文档见 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md).
+
+Version-to-version migration guides live in each release's **Migration**
+section below.
+
+---
+
+## 0.3.1
+
+### Added
+
+- Promoted 13 commonly used Sveltia CMS options to first-class integration
+  options, so they no longer need `extraConfig`: `singletons`,
+  `assetCollections`, `i18n`, `readonly`, `showPreviewLinks`, `displayUrl`,
+  `logoutRedirectUrl`, `editor`, `publishMode`, `fieldDefaults`, `output`,
+  `slug`, and `logoUrl`. Each is type-checked and forwarded to the matching
+  Sveltia config key.
+- Documented `readonly`, `singletons`, and `i18n` usage with examples in both
+  `README.md` and `README.zh-CN.md`.
+
+### Changed
+
+- Pinned the default Sveltia CMS version to `0.256.1` (previously `latest`)
+  via `DEFAULT_SVELTIA_VERSION`, so the admin UI is reproducible instead of
+  tracking the latest unpkg release. Override with `sveltiaVersion` only to
+  upgrade deliberately.
+- Bumped the `@sveltia/cms` type dependency from `^0.248.1` to `^0.256.1` to
+  match the pinned runtime version and remove the type/runtime drift.
+
+### Removed
+
+- Dropped the `locale` option. It was forwarded to Sveltia's `config.yml` but
+  Sveltia has no `locale` config key (the value was silently ignored); the CMS
+  UI language follows the browser. The `DEFAULT_LOCALE` constant and the
+  `config.locale` generation were also removed.
+
+### Migration (from 0.2.x)
+
+- If you used the `locale` option, remove it — the CMS UI language now follows
+  the browser automatically.
+- No other action required; the 13 promoted options are additive and the
+  pinned Sveltia version is a safe default.
+
+---
+
 ## 0.3.0
 
-Security and consistency release. Upgrading requires a config change
-(`CMS_ORIGIN`); see the README "Migrating from 0.2.x to 0.3.0" section.
+Security and consistency release.
 
 ### Security
 
@@ -49,43 +93,22 @@ Security and consistency release. Upgrading requires a config change
 - Added `check:templates` (rebuild templates, fail on drift) and a CI workflow
   that runs check + test + `check:templates` + build.
 
-### 中文
+### Migration (from 0.2.x)
 
-#### 安全
+| 0.2.x / 0.2.6                                             | 0.3.0                                                                                                                                                                                                                        |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Token posted to `window.opener` with `targetOrigin:"*"`   | Token is posted **only** to the configured `CMS_ORIGIN` (`https`/`localhost`). `CMS_ORIGIN` is now **required** — the auth endpoint returns `500` if it is missing or invalid. Re-run `astro-sveltia-pages init` and set it. |
+| EdgeOne client IP read from `x-forwarded-for` fallback    | EdgeOne now trusts only `request.eo.clientIp`; the `x-forwarded-for` fallback was removed (it could be spoofed, bypassing rate limiting).                                                                                    |
+| Two generated templates (`functions/`, `edge-functions/`) | A single self-contained `auth.js` is generated and copied to the right directory by `init --platform`.                                                                                                                       |
+| `astro-sveltia-pages/functions` exposed many internals    | Only stable APIs (`createAuthHandler`, `onRequest`, `signState`, `verifyState`) and a few public types are top-level exports; crypto/rate-limit/detect helpers moved to `astro-sveltia-pages/functions/internal`.            |
 
-- **令牌交接现绑定到固定 origin。** 成功页仅通过
-  `window.opener.postMessage(message, cmsOrigin)` 将 GitHub 令牌回传给配置好的
-  `CMS_ORIGIN`——绝不会发给 `"*"`。打开 auth 弹窗的攻击者页面无法再接收到令牌。接收方
-  CMS 仍需校验 `event.origin === CMS_ORIGIN`。
+After upgrading, re-run `pnpm exec astro-sveltia-pages init` to refresh the template and set `CMS_ORIGIN` in the platform dashboard.
 
-#### 行为变更
-
-- **`CMS_ORIGIN` 现已必填。** 必须为 `https` origin（本地开发可用
-  `http://localhost`）。当它缺失或无效时，auth 端点返回 `500`。请在平台控制台中设置它，
-  并重新运行 `astro-sveltia-pages init`。
-- **EdgeOne 客户端 IP 现在仅信任 `request.eo.clientIp`。** 此前
-  `x-forwarded-for` / `eo-client-ip` 的请求头回退已被移除，因为它们可被客户端伪造，
-  从而让攻击者轮换按 IP 限流的键并绕过节流。当运行时未暴露 IP 时，对应桶回退为
-  `unknown`。
-
-#### 功能 / 重构
-
-- **单一自动探测模板。** `astro-sveltia-pages init` 现在基于 `--platform` 复制一份
-  自包含的 `auth.js`（使用能按请求探测 Cloudflare 与 EdgeOne 的 `autoAdapter`），
-  放入 `functions/` 或 `edge-functions/`。旧的按平台模板已移除。为 0.3.0 之前构建的
-  包保留了对旧路径的回退。
-- **限流器为内存设上限。** 当超过 `MAX_TRACKED_CLIENTS` 时，`createRateLimiter`
-  会淘汰最早到期的桶，因此不断轮换键的客户端无法无限制地占用内存。
-- **更窄的公开 API。** `astro-sveltia-pages/functions` 仅导出稳定面
-  （`createAuthHandler`、`signState`、`verifyState`、`Platform*` 类型）。适配器、加密与
-  限流辅助函数移至 `astro-sveltia-pages/functions/internal`（不稳定；可能在任意版本中变动）。
-
-#### 工具
-
-- 新增 `check:templates`（重建模板，发生漂移则失败）以及运行 check + test +
-  `check:templates` + build 的 CI 工作流。
+---
 
 ## 0.2.6
+
+### Added
 
 - Added EdgeOne Pages support.
 - Split the OAuth runtime into a platform adapter layer
@@ -93,3 +116,36 @@ Security and consistency release. Upgrading requires a config change
 - Replaced random CSRF state with a signed, timestamped state
   (`signState`/`verifyState`).
 - Added a per-isolate rate limiter.
+
+### Migration (from 0.2.x)
+
+| 0.2.x                                      | 0.2.6                                                                                                                                                                       |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `functions/auth.js` (hand-maintained copy) | Still the Cloudflare entry point, but generated from `src/functions` by `vp run build:templates`. Run `pnpm exec astro-sveltia-pages init` again to refresh it.             |
+| —                                          | New: `edge-functions/auth.js` for EdgeOne Pages, created by `astro-sveltia-pages init --platform edgeone`.                                                                  |
+| —                                          | New: `platform` option (`"cloudflare"` \| `"edgeone"`) and `astro-sveltia-pages/functions*` exports.                                                                        |
+| CSRF `state` was a random value            | The state is now `timestamp.HMAC-SHA256(timestamp, clientSecret)` with a 10 minute TTL, verified with a timing-safe comparison. The OAuth App callback URL does not change. |
+| No rate limiting                           | The auth endpoint is rate limited per client IP (30 requests per minute per isolate).                                                                                       |
+
+Existing Cloudflare deployments keep working: the callback URL stays `{siteUrl}/auth` and the environment variables are unchanged. Copy the new template over `functions/auth.js` to pick up the signed state and the rate limit.
+
+---
+
+## 0.2.5
+
+### Changed
+
+- Removed the built-in OAuth routes and the injected admin page in favor of
+  generated static files plus an auth template.
+
+### Migration (from 0.2.x)
+
+| 0.2.x                                                               | 0.2.5                                                                                                                                  |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `oauth: true/false` (Astro API routes `/api/auth`, `/api/callback`) | Removed. Run `pnpm exec astro-sveltia-pages init` and host `functions/auth.js` on Cloudflare Pages.                                    |
+| `./routes/auth`, `./routes/callback`, `./admin.astro` exports       | Removed. Nothing to import; the admin UI is generated at build time.                                                                   |
+| `route: "/cms"`                                                     | Removed. The admin UI is always generated at `/admin/`. Add a `_redirects` rule (`/cms/* /admin/:splat 301`) if you need the old path. |
+| `title: "..."`                                                      | Renamed to `appTitle`.                                                                                                                 |
+| `config: { backend, media_folder, ..., collections }`               | Split into top-level options (`repo`, `branch`, `mediaFolder`, ...) plus `extraConfig` for anything else.                              |
+| —                                                                   | New: `r2` option generates `media_libraries.cloudflare_r2`.                                                                            |
+| —                                                                   | New: `sveltiaVersion` controls the unpkg version of the CMS script.                                                                    |

@@ -85,8 +85,8 @@ describe("sveltiaPages — astro:config:setup", () => {
         const codegenDir = makeTempDir();
         const integration = sveltiaPages({
             ...baseOptions,
-            locale: "en",
-            extraConfig: { locale: "fr", something_new: 1 },
+            appTitle: "My CMS",
+            extraConfig: { app_title: "Other CMS", something_new: 1 },
         });
         const logger = makeLogger();
 
@@ -98,7 +98,7 @@ describe("sveltiaPages — astro:config:setup", () => {
 
         expect(logger.warn).toHaveBeenCalledTimes(1);
         expect(logger.warn).toHaveBeenCalledWith(
-            expect.stringContaining('extraConfig key "locale" overrides'),
+            expect.stringContaining('extraConfig key "app_title" overrides'),
         );
     });
 });

@@ -14,9 +14,8 @@ export default defineConfig({
 
             mediaFolder: "public/images",
             publicFolder: "/images",
-            locale: "zh",
             appTitle: "My CMS",
-            sveltiaVersion: "latest",
+            // sveltiaVersion defaults to the pinned 0.256.1; override only if needed.
 
             // Optional: Cloudflare R2 external media library.
             // The secret access key is entered in the CMS UI on first use,
@@ -81,6 +80,18 @@ export default defineConfig({
                         },
                         { label: "Body", name: "body", widget: "markdown" },
                     ],
+                },
+            ],
+
+            // New first-class options (previously only reachable via extraConfig):
+            showPreviewLinks: true,
+            readonly: false,
+            singletons: [
+                {
+                    name: "site",
+                    label: "Site Settings",
+                    file: "src/data/site.json",
+                    fields: [{ label: "Site Title", name: "title", widget: "string" }],
                 },
             ],
 

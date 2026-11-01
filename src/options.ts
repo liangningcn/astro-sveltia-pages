@@ -45,8 +45,6 @@ export type SveltiaPagesOptions = {
     mediaFolder?: string;
     /** Default: `/images`. */
     publicFolder?: string;
-    /** CMS UI language. Default: `zh`. */
-    locale?: string;
     /** CMS title shown in the browser tab and login page. Default: `Sveltia CMS`. */
     appTitle?: string;
     /** CMS logo, e.g. `{ src: "/logo.svg" }`. */
@@ -55,7 +53,7 @@ export type SveltiaPagesOptions = {
     backendName?: string;
     /**
      * Sveltia CMS version loaded from unpkg, without the leading `@`.
-     * Default: `latest`.
+     * Default: `0.256.1` (pinned; previously `latest`).
      */
     sveltiaVersion?: string;
     /**
@@ -69,6 +67,66 @@ export type SveltiaPagesOptions = {
      * environment variables are configured in.
      */
     platform?: PlatformName;
+    /**
+     * Singleton files (non-collection editable files), e.g. a site settings
+     * file. Maps to the Sveltia `singletons` config key.
+     */
+    singletons?: unknown[];
+    /**
+     * Asset collections. Maps to the Sveltia `asset_collections` config key.
+     */
+    assetCollections?: unknown[];
+    /**
+     * Global i18n options. Maps to the Sveltia `i18n` config key.
+     */
+    i18n?: Record<string, unknown>;
+    /**
+     * Make the whole CMS read-only (e.g. during maintenance).
+     * Maps to the Sveltia `readonly` config key. Default: `false`.
+     */
+    readonly?: boolean;
+    /**
+     * Whether to show links to live/deploy-preview entries.
+     * Maps to the Sveltia `show_preview_links` config key.
+     */
+    showPreviewLinks?: boolean;
+    /**
+     * URL linked from the UI. Maps to the Sveltia `display_url` config key.
+     */
+    displayUrl?: string;
+    /**
+     * URL to redirect to after logout.
+     * Maps to the Sveltia `logout_redirect_url` config key.
+     */
+    logoutRedirectUrl?: string;
+    /**
+     * Editor view options. Maps to the Sveltia `editor` config key.
+     */
+    editor?: Record<string, unknown>;
+    /**
+     * Publish mode (string or object with options).
+     * Maps to the Sveltia `publish_mode` config key.
+     */
+    publishMode?: string | Record<string, unknown>;
+    /**
+     * Default options applied to all fields.
+     * Maps to the Sveltia `field_defaults` config key.
+     */
+    fieldDefaults?: Record<string, unknown>;
+    /**
+     * Data output options. Maps to the Sveltia `output` config key.
+     */
+    output?: Record<string, unknown>;
+    /**
+     * Slug options for entries and assets.
+     * Maps to the Sveltia `slug` config key.
+     */
+    slug?: Record<string, unknown>;
+    /**
+     * Absolute URL or path to the logo shown on the entrance page and as the
+     * favicon. Maps to the Sveltia `logo_url` config key.
+     */
+    logoUrl?: string;
 };
 
 function fail(message: string): never {
@@ -135,7 +193,14 @@ export function validateOptions(options: SveltiaPagesOptions): void {
         }
     }
 
-    for (const key of ["mediaFolder", "publicFolder", "locale", "appTitle"] as const) {
+    for (const key of [
+        "mediaFolder",
+        "publicFolder",
+        "appTitle",
+        "displayUrl",
+        "logoutRedirectUrl",
+        "logoUrl",
+    ] as const) {
         if (options[key] !== undefined && !isNonEmptyString(options[key])) {
             fail(`"${key}" must be a non-empty string.`);
         }
@@ -154,6 +219,50 @@ export function validateOptions(options: SveltiaPagesOptions): void {
         !isNonEmptyString(options.sveltiaVersion)
     ) {
         fail('"sveltiaVersion" must be a non-empty string.');
+    }
+
+    if (options.readonly !== undefined && typeof options.readonly !== "boolean") {
+        fail('"readonly" must be a boolean.');
+    }
+
+    if (
+        options.showPreviewLinks !== undefined &&
+        typeof options.showPreviewLinks !== "boolean"
+    ) {
+        fail('"showPreviewLinks" must be a boolean.');
+    }
+
+    if (options.singletons !== undefined && !Array.isArray(options.singletons)) {
+        fail('"singletons" must be an array.');
+    }
+
+    if (
+        options.assetCollections !== undefined &&
+        !Array.isArray(options.assetCollections)
+    ) {
+        fail('"assetCollections" must be an array.');
+    }
+
+    for (const key of ["i18n", "editor", "fieldDefaults", "output", "slug"] as const) {
+        const value = options[key];
+        if (
+            value !== undefined &&
+            (typeof value !== "object" || value === null || Array.isArray(value))
+        ) {
+            fail(`"${key}" must be an object.`);
+        }
+    }
+
+    if (
+        options.publishMode !== undefined &&
+        !(
+            typeof options.publishMode === "string" ||
+            (typeof options.publishMode === "object" &&
+                options.publishMode !== null &&
+                !Array.isArray(options.publishMode))
+        )
+    ) {
+        fail('"publishMode" must be a string or an object.');
     }
 
     if (options.extraConfig !== undefined && typeof options.extraConfig !== "object") {

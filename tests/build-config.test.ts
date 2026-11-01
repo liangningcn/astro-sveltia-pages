@@ -33,7 +33,7 @@ describe("buildCmsConfig — defaults", () => {
         const raw = config as Record<string, unknown>;
         expect(raw["media_folder"]).toBe("public/images");
         expect(raw["public_folder"]).toBe("/images");
-        expect(raw["locale"]).toBe("zh");
+        expect(raw["locale"]).toBeUndefined();
         expect(raw["site_url"]).toBe("https://from-astro.example");
         expect(raw["app_title"]).toBe("Sveltia CMS");
         expect(raw["media_libraries"]).toBeUndefined();
@@ -114,19 +114,19 @@ describe("buildCmsConfig — extraConfig", () => {
         const { config, conflicts } = buildCmsConfig(
             {
                 ...baseOptions,
-                locale: "en",
+                appTitle: "My CMS",
                 extraConfig: {
                     brand_new: true,
-                    locale: "fr",
+                    app_title: "Other CMS",
                     media_folder: "public/uploads",
                 },
             },
             "https://example.com",
         );
 
-        expect(conflicts).toEqual(["media_folder", "locale"]);
+        expect(conflicts).toEqual(["media_folder", "app_title"]);
         const raw = config as Record<string, unknown>;
-        expect(raw["locale"]).toBe("fr");
+        expect(raw["app_title"]).toBe("Other CMS");
         expect(raw["media_folder"]).toBe("public/uploads");
         expect(raw["brand_new"]).toBe(true);
     });
