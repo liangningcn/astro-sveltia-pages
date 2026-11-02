@@ -48,6 +48,12 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   以及单篇 frontmatter 标记 `autoTranslate: false`（可在 CMS 内勾选），使该条目不触发翻译。
   两者都在变更检测阶段过滤，被跳过的条目仍以英文发布、只是不被自动翻译，之后可用
   `workflow_dispatch`（force）补翻。无待翻译文件时翻译步骤整体跳过。
+- 为 `workflow_dispatch` 新增 `scope` 输入：可对**已存在（存量）站点**分批引导翻译
+  （例如先 `scope: posts`、再 `scope: products`），避免一次性巨量翻译导致超时/限流。
+  已存在于 `main` 的 EN 文件不会自动触发翻译，需用手动 dispatch（force + scope）引导；
+  运行具备增量续翻能力（读取仓库中已有译文、只补缺失部分），中断后可安全重跑。
+- 在 example 的 `posts` 与 `authors` 集合加入 `autoTranslate` 布尔字段，使该开关可在
+  CMS 界面勾选（默认开启）。
 
 ---
 

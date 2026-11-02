@@ -29,7 +29,7 @@ export default defineConfig({
 
             // ── 多语言：Sveltia 只负责编辑英文源（default_locale: en）。
             //    其余 15 种语言由 .github/workflows/i18n-translate.yml 在 CI 中翻译，
-            //    并以 PR 形式提交，避免 CMS 手动逐语言点击。
+            //    自检通过后直接提交 main 自动发布，避免 CMS 手动逐语言点击。
             //    `multiple_folders` 结构下文件路径为 content/{collection}/{locale}/{slug}.md。
             i18n: {
                 structure: "multiple_folders",
@@ -66,6 +66,14 @@ export default defineConfig({
                     identifier_field: "name",
                     slug: "{{slug}}",
                     fields: [
+                        // 是否纳入 CI 自动翻译（默认开启）；取消勾选则只上英文、不触发翻译。
+                        {
+                            label: "Auto Translate",
+                            name: "autoTranslate",
+                            widget: "boolean",
+                            default: true,
+                            required: false,
+                        },
                         // 姓名/头像为 locale 无关的引用，原样复制、永不被翻译。
                         {
                             label: "Name",
@@ -97,6 +105,14 @@ export default defineConfig({
                     slug: "{{slug}}",
                     sortable_fields: ["title", "date"],
                     fields: [
+                        // 是否纳入 CI 自动翻译（默认开启）；取消勾选则发布后只上英文、不触发翻译。
+                        {
+                            label: "Auto Translate",
+                            name: "autoTranslate",
+                            widget: "boolean",
+                            default: true,
+                            required: false,
+                        },
                         // title / body 可翻译（默认）；其余字段为 locale 无关，标记 duplicate。
                         { label: "Title", name: "title", widget: "string" },
                         {

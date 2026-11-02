@@ -21,6 +21,8 @@
 #    它们会被原样复制、永不被送翻。
 #    不触发翻译：单篇在 frontmatter 设 `autoTranslate: false`；
 #    全局暂停：把本文件 env.AUTO_TRANSLATE 改为 "false"。
+#    存量站引导：已存在的 EN 文件不会自动翻译。到 Actions → i18n-translate → Run workflow，
+#    勾选 force 并填 scope（如 posts / products）分批翻译；中断重跑会增量续翻已有译文。
 # ───────────────────────────────────────────────────────────────────
 
 name: i18n-translate
@@ -34,9 +36,13 @@ on:
     workflow_dispatch:
         inputs:
             force:
-                description: "绕过增量，强制全量翻译"
+                description: "绕过增量，强制全量翻译（用于存量站批量引导）"
                 required: false
                 default: "false"
+            scope:
+                description: "限定 EN 文件路径的正则（如 posts 只翻博客、products 只翻产品）；留空=全部"
+                required: false
+                default: ""
 
 permissions:
     contents: write
@@ -83,12 +89,18 @@ jobs:
                     exit 0
                   fi
                   if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.inputs.force }}" = "true" ]; then
-                    # 强制全量：列出所有英文源
+                    # 强制全量：列出所有英文源（存量站批量引导用）
                     MAP=$(git ls-files | grep -E "^${CONTENT_ROOT}/.+/en/.+\.md$" || true)
                   else
                     # 增量：与本次 push 之前的状态比较
                     MAP=$(git diff --name-only "${{ github.event.before }}" "${{ github.event.after }}" \
                           | grep -E "^${CONTENT_ROOT}/.+/en/.+\.md$" || true)
+                  fi
+                  # 应用 scope 限定（仅 workflow_dispatch 时可指定，留空=不过滤）。
+                  # 例：scope=posts 只翻博客；scope=products 只翻产品；分批引导避免单次超时/限流。
+                  SCOPE="${{ github.event.inputs.scope }}"
+                  if [ -n "$SCOPE" ]; then
+                    MAP=$(printf '%s\n' "$MAP" | grep -E "$SCOPE" || true)
                   fi
                   # 单篇开关：frontmatter 含 `autoTranslate: false` 的条目排除（不触发翻译）
                   # 在 CMS 里加一个布尔字段 autoTranslate 即可勾选；默认翻译。

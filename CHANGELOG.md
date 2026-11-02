@@ -60,6 +60,14 @@ section below.
   publishes in English but is not auto-translated; it can be back-filled later via
   `workflow_dispatch` (force). The translate step is skipped entirely when no
   files remain.
+- Added a `scope` input to `workflow_dispatch` so an existing (pre-populated) site
+  can be translated incrementally in batches (e.g. `scope: posts` then
+  `scope: products`) instead of one giant run. Existing EN files in `main` never
+  auto-trigger translation; bootstrap them via the manual dispatch with `force` +
+  `scope`. Runs resume incrementally (existing translations in the repo are read and
+  only gaps are filled), so an interrupted batch can be re-run safely.
+- Added an `autoTranslate` boolean field to the `posts` and `authors` collections
+  in the example so the opt-out is toggleable from the CMS UI (defaults to `true`).
 
 ---
 
