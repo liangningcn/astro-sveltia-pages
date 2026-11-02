@@ -19,6 +19,8 @@
 #        save_all_locales: false       # ← 让 CMS 只提交 en 文件，CI 负责其余语言
 #    把 slug / 图片路径等“不可翻译字段”标记为 `i18n: duplicate`，
 #    它们会被原样复制、永不被送翻。
+#    不触发翻译：单篇在 frontmatter 设 `autoTranslate: false`；
+#    全局暂停：把本文件 env.AUTO_TRANSLATE 改为 "false"。
 # ───────────────────────────────────────────────────────────────────
 
 name: i18n-translate
@@ -53,6 +55,8 @@ env:
     #                    CMS 后台无需任何二次点击；Sveltia 也不需要“发布”按钮。
     #   pr            → 改为开 PR 待人工合并（保留复核闸门，适合对机翻质量强管控的站点）。
     PUBLISH_MODE: "commit"
+    # 翻译总开关：false 时整体暂停（任何 EN 发布都不触发翻译），用于大批量迁移/临时冻结。
+    AUTO_TRANSLATE: "true"
     # 15 个目标语言（按你的站点调整；逗号分隔，pelikhan 一次输出全部）
     TARGET_LANGS: "fr,de,es,ja,zh,pt,ru,ar,ko,it,nl,pl,tr,vi,th"
     CONTENT_ROOT: "example/src/content" # ← 改成你的 content 根目录
@@ -68,21 +72,37 @@ jobs:
               with:
                   fetch-depth: 0 # 需要 before/after 两个 SHA 做增量差异
 
-            # ── 1) 增量检测：仅取出变更的英文源文件 ──
+            # ── 1) 增量检测：仅取出变更的英文源文件，并过滤掉“不翻译”的条目 ──
             - name: Detect changed EN sources
               id: changes
               run: |
+                  # 全局开关：AUTO_TRANSLATE != true 时整体暂停翻译
+                  if [ "${AUTO_TRANSLATE:-true}" != "true" ]; then
+                    echo "AUTO_TRANSLATE=false，已暂停翻译"
+                    echo "files=" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
                   if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.inputs.force }}" = "true" ]; then
                     # 强制全量：列出所有英文源
-                    MAP=$(git ls-files | grep -E "^${CONTENT_ROOT}/.+/en/.+\.md$")
+                    MAP=$(git ls-files | grep -E "^${CONTENT_ROOT}/.+/en/.+\.md$" || true)
                   else
                     # 增量：与本次 push 之前的状态比较
                     MAP=$(git diff --name-only "${{ github.event.before }}" "${{ github.event.after }}" \
                           | grep -E "^${CONTENT_ROOT}/.+/en/.+\.md$" || true)
                   fi
-                  FILES=$(echo "$MAP" | sed '/^$/d' | paste -sd ';' -)   # pelikhan 用分号分隔
+                  # 单篇开关：frontmatter 含 `autoTranslate: false` 的条目排除（不触发翻译）
+                  # 在 CMS 里加一个布尔字段 autoTranslate 即可勾选；默认翻译。
+                  KEEP=""
+                  for f in $MAP; do
+                    if head -n 40 "$f" | grep -q '^autoTranslate:[[:space:]]*false[[:space:]]*$'; then
+                      echo "跳过（autoTranslate:false）: $f"
+                    else
+                      KEEP="$KEEP$f"$'\n'
+                    fi
+                  done
+                  FILES=$(printf '%s' "$KEEP" | sed '/^$/d' | paste -sd ';' -)   # pelikhan 用分号分隔
                   echo "files=$FILES" >> "$GITHUB_OUTPUT"
-                  echo "变更文件: $FILES"
+                  echo "待翻译文件: $FILES"
 
             # ── 2) 翻译：复用现成 Action（remark AST 解析，代码块/链接天然保留）──
             # 默认走 GitHub Models（GITHUB_TOKEN + models:read，有免费额度）。
@@ -91,6 +111,7 @@ jobs:
             #     openai_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
             #     openai_api_base: https://api.deepseek.com
             - name: Translate via pelikhan/action-continuous-translation
+              if: steps.changes.outputs.files != ''
               uses: pelikhan/action-continuous-translation@v0
               continue-on-error: true # 单语言失败不阻断其余语言
               with:

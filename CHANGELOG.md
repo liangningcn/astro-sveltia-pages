@@ -53,6 +53,13 @@ section below.
   publishes queue and run one at a time, avoiding translation-API rate-limit
   storms and mid-run cancellations. The publish step verifies no target-locale
   file is empty before committing.
+- Added two opt-out switches for translations: a global `AUTO_TRANSLATE` env
+  (`false` pauses all translation) and a per-entry frontmatter flag
+  `autoTranslate: false` (set in the CMS) that excludes a single entry from
+  translation. Both are applied during change detection so a skipped entry still
+  publishes in English but is not auto-translated; it can be back-filled later via
+  `workflow_dispatch` (force). The translate step is skipped entirely when no
+  files remain.
 
 ---
 

@@ -44,6 +44,10 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   无需 CMS 二次操作；设为 `PUBLISH_MODE: "pr"` 可保留人工合并闸门。新增串行
   `concurrency` 锁（`cancel-in-progress: false`），使连续发布的多篇文章排队逐一翻译，
   避免翻译 API 限流风暴与运行中被取消导致的错乱。发布步骤会先校验目标语言译文非空再提交。
+- 新增两个“不翻译”开关：全局 `AUTO_TRANSLATE` 环境变量（`false` 时整体暂停翻译）；
+  以及单篇 frontmatter 标记 `autoTranslate: false`（可在 CMS 内勾选），使该条目不触发翻译。
+  两者都在变更检测阶段过滤，被跳过的条目仍以英文发布、只是不被自动翻译，之后可用
+  `workflow_dispatch`（force）补翻。无待翻译文件时翻译步骤整体跳过。
 
 ---
 
