@@ -1,0 +1,133 @@
+# .github/workflows/i18n-translate.yml
+#
+# 版本: 0.3.2 (astro-sveltia-pages)
+# 方案: 选项 A —— 复用 pelikhan/action-continuous-translation 作为翻译引擎。
+#
+# 目标: Sveltia CMS 编辑只维护英文源文件；本工作流在 EN 源变更时，
+#       增量翻译为 15 个目标语言，并以 PR 形式提交译文（不直接 push main）。
+#
+# ── 接入说明 ───────────────────────────────────────────────────────
+# 本仓库的 `example/` 已作为内置 dogfood 启用了上述配置，路径即默认值，
+# 无需改动即可直接验证。接入你自己的站点时改两处：
+# 1) 下方 `on.push.paths` 与 `Detect changed EN sources` 步骤里的
+#    `example/src/content/**/en/**` 改成你真实站点的英文源内容路径。
+# 2) Sveltia 侧配置（关键）：
+#      i18n:
+#        structure: multiple_folders   # 或 multiple_files
+#        default_locale: en
+#        save_all_locales: false       # ← 让 CMS 只提交 en 文件，CI 负责其余语言
+#    把 slug / 图片路径等“不可翻译字段”标记为 `i18n: duplicate`，
+#    它们会被原样复制、永不被送翻。
+# ───────────────────────────────────────────────────────────────────
+
+name: i18n-translate
+
+on:
+    # 只监听英文源文件；译文文件不会再次触发，天然避免回环
+    push:
+        branches: [main]
+        paths:
+            - "example/src/content/**/en/**" # ← 改成你的 content 英文源路径
+    workflow_dispatch:
+        inputs:
+            force:
+                description: "绕过增量，强制全量翻译"
+                required: false
+                default: "false"
+
+permissions:
+    contents: write
+    pull-requests: write
+    models: read # 若使用 GitHub Models 免费额度（pelikhan 默认）
+
+concurrency:
+    group: i18n-translate-${{ github.ref }}
+    cancel-in-progress: true
+
+env:
+    # 15 个目标语言（按你的站点调整；逗号分隔，pelikhan 一次输出全部）
+    TARGET_LANGS: "fr,de,es,ja,zh,pt,ru,ar,ko,it,nl,pl,tr,vi,th"
+    CONTENT_ROOT: "example/src/content" # ← 改成你的 content 根目录
+    I18N_STRUCTURE: "multiple_folders" # multiple_folders | multiple_files
+
+jobs:
+    translate:
+        runs-on: ubuntu-latest
+        # 防御：本工作流自提交若误命中 main 也不重跑（PR 模式下实际不会命中）
+        if: github.actor != 'github-actions[bot]'
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0 # 需要 before/after 两个 SHA 做增量差异
+
+            # ── 1) 增量检测：仅取出变更的英文源文件 ──
+            - name: Detect changed EN sources
+              id: changes
+              run: |
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.inputs.force }}" = "true" ]; then
+                    # 强制全量：列出所有英文源
+                    MAP=$(git ls-files | grep -E "^${CONTENT_ROOT}/.+/en/.+\.md$")
+                  else
+                    # 增量：与本次 push 之前的状态比较
+                    MAP=$(git diff --name-only "${{ github.event.before }}" "${{ github.event.after }}" \
+                          | grep -E "^${CONTENT_ROOT}/.+/en/.+\.md$" || true)
+                  fi
+                  FILES=$(echo "$MAP" | sed '/^$/d' | paste -sd ';' -)   # pelikhan 用分号分隔
+                  echo "files=$FILES" >> "$GITHUB_OUTPUT"
+                  echo "变更文件: $FILES"
+
+            # ── 2) 翻译：复用现成 Action（remark AST 解析，代码块/链接天然保留）──
+            # 默认走 GitHub Models（GITHUB_TOKEN + models:read，有免费额度）。
+            # 生产环境 16 语言建议改用 DeepSeek/OpenAI，避免 GitHub Models 限流：
+            #   with:
+            #     openai_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
+            #     openai_api_base: https://api.deepseek.com
+            - name: Translate via pelikhan/action-continuous-translation
+              uses: pelikhan/action-continuous-translation@v0
+              continue-on-error: true # 单语言失败不阻断其余语言
+              with:
+                  github_token: ${{ secrets.GITHUB_TOKEN }}
+                  source: en
+                  lang: ${{ env.TARGET_LANGS }} # 一次输出全部 15 种语言
+                  files: ${{ steps.changes.outputs.files }} # 仅处理变更文件
+                  # 默认 filename_template 产出 content/{slug}.{lang}.md（紧邻源文件），
+                  # 后续由 scripts/remap-translations.sh 映射到 Sveltia 结构。
+                  instructions: |
+                      仅翻译正文与可翻译字段；
+                      严禁翻译：slug、图片/媒体路径、以 http(s):// 开头的外链、代码块与行内代码。
+                  glossary_file: i18n/glossary.md # 品牌名/术语白名单（保持不变）
+
+            # ── 3) 路径适配：把 Action 默认输出映射到 Sveltia 的 i18n 文件结构 ──
+            # multiple_files 结构（content/{slug}.{lang}.md）可注释掉此步；
+            # multiple_folders 结构（content/{lang}/{slug}.md）需要此步。
+            - name: Remap to Sveltia layout
+              if: env.I18N_STRUCTURE == 'multiple_folders'
+              run: bash scripts/remap-translations.sh "$TARGET_LANGS" "$CONTENT_ROOT" "$I18N_STRUCTURE"
+
+            # ── 4) 提交方式：推荐开 PR（不直接 push main，保留人工复核 & 杜绝回环）──
+            - name: Open / update translation PR
+              uses: peter-evans/create-pull-request@v6
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  commit-message: "i18n: auto-translate from EN sources"
+                  branch: i18n/auto-translate
+                  title: "🌐 i18n: 自动翻译（源语言 EN）"
+                  body: |
+                      由 Sveltia EN 源变更触发，覆盖目标语言：${{ env.TARGET_LANGS }}。
+                      请人工复核机翻质量后再合并。
+                  labels: i18n,automated
+                  add-paths: |
+                      ${{ env.CONTENT_ROOT }}/**
+
+            # ── 5) 失败处理 ──
+            # • Action 内部已做质量校验 + 增量缓存：某语言 API 报错/返回不完整时，
+            #   该文件保持原状（不写脏数据），下一次 EN 变更会增量重试。
+            # • 外部 API 限流：用 max_translation_tokens / max_validation_tokens 控制分片；
+            #   必要时在翻译 step 包一层重试（官方 retry action）。
+            # • 把缓存/失败日志作为 artifact 上传，便于排查未完成的 (locale, file)。
+            - name: Upload translation logs
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: translation-logs
+                  path: .genaiscript/cache/

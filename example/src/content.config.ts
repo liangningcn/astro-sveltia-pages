@@ -1,9 +1,14 @@
 import { sveltiaLoader } from "astro-sveltia-pages/loader";
 import { defineCollection } from "astro:content";
 
-const authors = defineCollection({ loader: sveltiaLoader("authors") });
+// `locale: "en"` is required: the CMS uses the `multiple_folders` i18n
+// structure, so the loader resolves content under `src/content/{collection}/en`.
+// The other 15 locales are produced by .github/workflows/i18n-translate.yml.
+const authors = defineCollection({
+    loader: sveltiaLoader("authors", { locale: "en" }),
+});
 
-const posts = defineCollection({ loader: sveltiaLoader("posts") });
+const posts = defineCollection({ loader: sveltiaLoader("posts", { locale: "en" }) });
 
 export const collections = { authors, posts };
 

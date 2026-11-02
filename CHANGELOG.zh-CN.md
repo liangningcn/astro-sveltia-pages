@@ -8,6 +8,36 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.3.2
+
+### 新增
+
+- 新增可选的 GitHub Actions 工作流（`.github/workflows/i18n-translate.yml`），
+  用于自动化多语言翻译，使 Sveltia CMS 编辑只需维护英文源文件。该工作流复用
+  `pelikhan/action-continuous-translation`（基于 remark AST 解析、增量翻译、
+  缓存与质量校验），将变更的英文 Markdown 翻译为 15 个目标语言，并发起翻译
+  Pull Request。
+- 新增 `i18n/glossary.md`（跨语言保持不变的品牌名/产品词）与
+  `scripts/remap-translations.sh`（将 Action 默认的
+  `content/{collection}/en/{slug}.{lang}.md` 输出重新映射为 Sveltia 的
+  `multiple_folders` 结构 `content/{collection}/{lang}/{slug}.md`）。
+
+### 变更
+
+- 在工作流头部与配套文件中说明了该工作流推荐的 Sveltia CMS 配置：设置
+  `i18n.save_all_locales: false`（或 `initial_locales: [en]`），使 CMS 仅提交
+  英文源文件；并将 `slug`/图片路径等字段标记为 `i18n: duplicate`，确保其不会
+  被送翻。
+- 将内置的 `example` 改造为该工作流的端到端 dogfood：启用了 16 语言 Sveltia
+  `i18n` 配置（`multiple_folders`、`default_locale: en`、15 个目标语言），为
+  `authors`/`posts` 集合设置 `save_all_locales: false` 与
+  `initial_locales: [en]`，将不可翻译字段（`name`、`avatar`、`date`、
+  `author`、`draft`、`cover`）标记为 `i18n: duplicate`，把示例内容移入 `en/`
+  子目录，并将 `sveltiaLoader` 指向 `locale: "en"`。现在向 `main` 推送 `en/`
+  下的文件即会触发翻译工作流。
+
+---
+
 ## 0.3.1
 
 ### 新增

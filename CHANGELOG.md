@@ -10,6 +10,39 @@ section below.
 
 ---
 
+## 0.3.2
+
+### Added
+
+- Added an opt-in GitHub Actions workflow (`.github/workflows/i18n-translate.yml`)
+  that automates multilingual translation so Sveltia CMS editors maintain only the
+  English source. It reuses `pelikhan/action-continuous-translation` (remark AST
+  parsing, incremental translation, caching, quality validation) to translate
+  changed English Markdown into the 15 target languages and opens a translation
+  pull request.
+- Added `i18n/glossary.md` (brand/product terms kept untranslated across locales)
+  and `scripts/remap-translations.sh` (maps the action's default
+  `content/{collection}/en/{slug}.{lang}.md` output to Sveltia's
+  `multiple_folders` layout `content/{collection}/{lang}/{slug}.md`).
+
+### Changed
+
+- Documented the recommended Sveltia CMS setup for this workflow in the workflow
+  header and supporting files: set `i18n.save_all_locales: false` (or
+  `initial_locales: [en]`) so the CMS commits only the English source, and mark
+  `slug`/image-path fields as `i18n: duplicate` so they are never sent for
+  translation.
+- Enabled the bundled `example` as an end-to-end dogfood for this workflow:
+  added a 16-locale Sveltia `i18n` config (`multiple_folders`,
+  `default_locale: en`, 15 target locales), set `save_all_locales: false` and
+  `initial_locales: [en]` on the `authors`/`posts` collections, marked
+  non-translatable fields (`name`, `avatar`, `date`, `author`, `draft`, `cover`)
+  as `i18n: duplicate`, moved sample content under `en/` folders, and pointed
+  `sveltiaLoader` at `locale: "en"`. Pushing to `main` on an `en/` file now
+  triggers the translation workflow.
+
+---
+
 ## 0.3.1
 
 ### Added

@@ -27,23 +27,59 @@ export default defineConfig({
                 publicUrl: "https://img.example.com",
             },
 
+            // ── 多语言：Sveltia 只负责编辑英文源（default_locale: en）。
+            //    其余 15 种语言由 .github/workflows/i18n-translate.yml 在 CI 中翻译，
+            //    并以 PR 形式提交，避免 CMS 手动逐语言点击。
+            //    `multiple_folders` 结构下文件路径为 content/{collection}/{locale}/{slug}.md。
+            i18n: {
+                structure: "multiple_folders",
+                default_locale: "en",
+                locales: [
+                    { locale: "en", label: "English" },
+                    { locale: "fr", label: "Français" },
+                    { locale: "de", label: "Deutsch" },
+                    { locale: "es", label: "Español" },
+                    { locale: "ja", label: "日本語" },
+                    { locale: "zh", label: "中文" },
+                    { locale: "pt", label: "Português" },
+                    { locale: "ru", label: "Русский" },
+                    { locale: "ar", label: "العربية" },
+                    { locale: "ko", label: "한국어" },
+                    { locale: "it", label: "Italiano" },
+                    { locale: "nl", label: "Nederlands" },
+                    { locale: "pl", label: "Polski" },
+                    { locale: "tr", label: "Türkçe" },
+                    { locale: "vi", label: "Tiếng Việt" },
+                    { locale: "th", label: "ไทย" },
+                ],
+            },
+
             collections: [
                 {
                     name: "authors",
                     label: "Authors",
                     label_singular: "Author",
                     folder: "src/content/authors",
+                    // 只提交英文源；CI 负责其余语言（见 i18n-translate.yml）。
+                    i18n: { save_all_locales: false, initial_locales: ["en"] },
                     create: true,
                     identifier_field: "name",
                     slug: "{{slug}}",
                     fields: [
-                        { label: "Name", name: "name", widget: "string" },
+                        // 姓名/头像为 locale 无关的引用，原样复制、永不被翻译。
+                        {
+                            label: "Name",
+                            name: "name",
+                            widget: "string",
+                            i18n: "duplicate",
+                        },
                         { label: "Bio", name: "bio", widget: "text", required: false },
                         {
                             label: "Avatar",
                             name: "avatar",
                             widget: "image",
                             required: false,
+                            i18n: "duplicate",
                         },
                     ],
                 },
@@ -51,12 +87,20 @@ export default defineConfig({
                     name: "posts",
                     label: "Posts",
                     folder: "src/content/posts",
+                    // 只提交英文源；CI 负责其余语言（见 i18n-translate.yml）。
+                    i18n: { save_all_locales: false, initial_locales: ["en"] },
                     create: true,
                     slug: "{{slug}}",
                     sortable_fields: ["title", "date"],
                     fields: [
+                        // title / body 可翻译（默认）；其余字段为 locale 无关，标记 duplicate。
                         { label: "Title", name: "title", widget: "string" },
-                        { label: "Date", name: "date", widget: "datetime" },
+                        {
+                            label: "Date",
+                            name: "date",
+                            widget: "datetime",
+                            i18n: "duplicate",
+                        },
                         {
                             label: "Author",
                             name: "author",
@@ -65,18 +109,21 @@ export default defineConfig({
                             search_fields: ["name"],
                             value_field: "{{slug}}",
                             display_fields: ["name"],
+                            i18n: "duplicate",
                         },
                         {
                             label: "Draft",
                             name: "draft",
                             widget: "boolean",
                             required: false,
+                            i18n: "duplicate",
                         },
                         {
                             label: "Cover Image",
                             name: "cover",
                             widget: "image",
                             required: false,
+                            i18n: "duplicate",
                         },
                         { label: "Body", name: "body", widget: "markdown" },
                     ],
