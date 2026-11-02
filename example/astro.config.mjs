@@ -87,6 +87,10 @@ export default defineConfig({
                     name: "posts",
                     label: "Posts",
                     folder: "src/content/posts",
+                    // 编辑工作流：CMS 中 Save 只开 PR（分支 cms/posts/[slug]），不碰 main，
+                    // 不触发部署；点 Publish 合并后才进 main 并触发构建/翻译。
+                    // authors 与单例保持默认 simple（保存即发布）。
+                    publish_mode: "editorial_workflow",
                     // 只提交英文源；CI 负责其余语言（见 i18n-translate.yml）。
                     i18n: { save_all_locales: false, initial_locales: ["en"] },
                     create: true,

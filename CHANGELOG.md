@@ -40,6 +40,11 @@ section below.
   as `i18n: duplicate`, moved sample content under `en/` folders, and pointed
   `sveltiaLoader` at `locale: "en"`. Pushing to `main` on an `en/` file now
   triggers the translation workflow.
+- Enabled Sveltia Editorial Workflow on the `posts` collection in the example
+  (`publish_mode: "editorial_workflow"`): a CMS save opens a
+  `cms/posts/[slug]` pull request without touching `main`, so deployment and the
+  translation workflow only run after the entry is published. `authors` and
+  singletons remain in the default `simple` mode.
 
 ---
 

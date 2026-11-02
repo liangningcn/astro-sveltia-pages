@@ -33,8 +33,12 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   `authors`/`posts` 集合设置 `save_all_locales: false` 与
   `initial_locales: [en]`，将不可翻译字段（`name`、`avatar`、`date`、
   `author`、`draft`、`cover`）标记为 `i18n: duplicate`，把示例内容移入 `en/`
-  子目录，并将 `sveltiaLoader` 指向 `locale: "en"`。现在向 `main` 推送 `en/`
+  子目录，并 将 `sveltiaLoader` 指向 `locale: "en"`。现在向 `main` 推送 `en/`
   下的文件即会触发翻译工作流。
+- 在 example 的 `posts` 集合启用 Sveltia 编辑工作流
+  （`publish_mode: "editorial_workflow"`）：CMS 中保存会开出
+  `cms/posts/[slug]` 的 Pull Request 而不触碰 `main`，因此部署与翻译工作流仅在该
+  条目被发布（合并）后才会运行。`authors` 与单例保持默认 `simple` 模式。
 
 ---
 
