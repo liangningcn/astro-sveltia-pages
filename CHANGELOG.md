@@ -45,6 +45,14 @@ section below.
   `cms/posts/[slug]` pull request without touching `main`, so deployment and the
   translation workflow only run after the entry is published. `authors` and
   singletons remain in the default `simple` mode.
+- Reworked the translation workflow's publish flow so it self-checks and publishes
+  **directly to `main`** (`PUBLISH_MODE: "commit"`, the new default) instead of
+  only opening a PR. Translations now go live automatically on publish with no
+  second CMS action; set `PUBLISH_MODE: "pr"` to keep a human merge gate. Added a
+  serial `concurrency` lock (`cancel-in-progress: false`) so rapid multi-post
+  publishes queue and run one at a time, avoiding translation-API rate-limit
+  storms and mid-run cancellations. The publish step verifies no target-locale
+  file is empty before committing.
 
 ---
 

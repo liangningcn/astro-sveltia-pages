@@ -39,6 +39,11 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   （`publish_mode: "editorial_workflow"`）：CMS 中保存会开出
   `cms/posts/[slug]` 的 Pull Request 而不触碰 `main`，因此部署与翻译工作流仅在该
   条目被发布（合并）后才会运行。`authors` 与单例保持默认 `simple` 模式。
+- 重构翻译工作流的发布流程：改为“自检通过后**直接提交到 `main`**”
+  （新增默认开关 `PUBLISH_MODE: "commit"`），不再仅开 PR。译文在发布时自动上线，
+  无需 CMS 二次操作；设为 `PUBLISH_MODE: "pr"` 可保留人工合并闸门。新增串行
+  `concurrency` 锁（`cancel-in-progress: false`），使连续发布的多篇文章排队逐一翻译，
+  避免翻译 API 限流风暴与运行中被取消导致的错乱。发布步骤会先校验目标语言译文非空再提交。
 
 ---
 

@@ -4,7 +4,8 @@
 # 方案: 选项 A —— 复用 pelikhan/action-continuous-translation 作为翻译引擎。
 #
 # 目标: Sveltia CMS 编辑只维护英文源文件；本工作流在 EN 源变更时，
-#       增量翻译为 15 个目标语言，并以 PR 形式提交译文（不直接 push main）。
+#       增量翻译为 15 个目标语言，并“自检通过后直接发布到 main”（无需 CMS 二次操作）。
+#       通过 env.PUBLISH_MODE 可切换为开 PR 待人工合并。
 #
 # ── 接入说明 ───────────────────────────────────────────────────────
 # 本仓库的 `example/` 已作为内置 dogfood 启用了上述配置，路径即默认值，
@@ -40,11 +41,18 @@ permissions:
     pull-requests: write
     models: read # 若使用 GitHub Models 免费额度（pelikhan 默认）
 
+# 串行执行：避免同一时间多篇文章发布导致多个翻译 Job 并发打爆翻译 API 限流。
+# cancel-in-progress:false → 后到的发布排队逐个完成（不互相取消、不丢进度、不错乱）。
 concurrency:
-    group: i18n-translate-${{ github.ref }}
-    cancel-in-progress: true
+    group: i18n-translate
+    cancel-in-progress: false
 
 env:
+    # 发布方式开关：
+    #   commit（默认）→ 译文自检通过后直接提交 main，站点自动重建即“正式发布”，
+    #                    CMS 后台无需任何二次点击；Sveltia 也不需要“发布”按钮。
+    #   pr            → 改为开 PR 待人工合并（保留复核闸门，适合对机翻质量强管控的站点）。
+    PUBLISH_MODE: "commit"
     # 15 个目标语言（按你的站点调整；逗号分隔，pelikhan 一次输出全部）
     TARGET_LANGS: "fr,de,es,ja,zh,pt,ru,ar,ko,it,nl,pl,tr,vi,th"
     CONTENT_ROOT: "example/src/content" # ← 改成你的 content 根目录
@@ -96,6 +104,11 @@ jobs:
                       仅翻译正文与可翻译字段；
                       严禁翻译：slug、图片/媒体路径、以 http(s):// 开头的外链、代码块与行内代码。
                   glossary_file: i18n/glossary.md # 品牌名/术语白名单（保持不变）
+                  # 限流/分片调优（按需打开，缓解 DeepSeek/OpenAI 速率限制）：
+                  # max_translation_tokens: 8000   # 单篇超长时分片，单次调用 token 上限
+                  # max_validation_tokens: 4000    # 质量自检分片上限
+                  # 注：串行锁已保证“跨 run 不并发”；若单 run 内 15 语言仍触发 429，
+                  #     调小上方数值或显式指定较慢的模型。
 
             # ── 3) 路径适配：把 Action 默认输出映射到 Sveltia 的 i18n 文件结构 ──
             # multiple_files 结构（content/{slug}.{lang}.md）可注释掉此步；
@@ -104,8 +117,34 @@ jobs:
               if: env.I18N_STRUCTURE == 'multiple_folders'
               run: bash scripts/remap-translations.sh "$TARGET_LANGS" "$CONTENT_ROOT" "$I18N_STRUCTURE"
 
-            # ── 4) 提交方式：推荐开 PR（不直接 push main，保留人工复核 & 杜绝回环）──
-            - name: Open / update translation PR
+            # ── 4) 发布方式（仅在翻译 step 自检通过、outcome==success 时执行）──
+            # PUBLISH_MODE=commit（默认）：译文直接 commit 到 main，站点自动重建即“正式发布”，
+            #   无需 CMS 二次点击；Sveltia 后台也不再需要“发布”按钮。
+            #   （译文文件均非 en 路径，不会再次触发本工作流，天然无回环。）
+            - name: Self-check & publish to main (commit mode)
+              if: steps.translate.outcome == 'success' && env.PUBLISH_MODE == 'commit'
+              run: |
+                  # 步骤 3 已完成路径重映射（multiple_folders）。此处仅做发布前自检 + 提交。
+                  if [ -z "$(git status --porcelain "$CONTENT_ROOT")" ]; then
+                    echo "无译文产出，跳过发布"; exit 0
+                  fi
+                  # 自检：任意“非英文”译文文件为空 → 视为翻译不完整，终止发布（不写脏数据）
+                  EMPTY=$(find "$CONTENT_ROOT" -name '*.md' ! -path '*/en/*' -size 0 2>/dev/null || true)
+                  if [ -n "$EMPTY" ]; then
+                    echo "存在空译文，终止发布："; echo "$EMPTY"; exit 1
+                  fi
+                  git config user.name "i18n-bot"
+                  git config user.email "i18n-bot@users.noreply.github.com"
+                  git add -A "$CONTENT_ROOT"
+                  git commit -m "i18n: auto-translate EN → ${{ env.TARGET_LANGS }}"
+                  # 串行锁 + rebase 到最新 main，避免与并行合并冲突导致 push 失败
+                  git fetch origin main
+                  git rebase origin/main
+                  git push origin HEAD:main
+
+            # PUBLISH_MODE=pr：改为开 PR 待人工合并（保留复核闸门）
+            - name: Open translation PR (pr mode)
+              if: steps.translate.outcome == 'success' && env.PUBLISH_MODE == 'pr'
               uses: peter-evans/create-pull-request@v6
               with:
                   token: ${{ secrets.GITHUB_TOKEN }}
@@ -114,7 +153,7 @@ jobs:
                   title: "🌐 i18n: 自动翻译（源语言 EN）"
                   body: |
                       由 Sveltia EN 源变更触发，覆盖目标语言：${{ env.TARGET_LANGS }}。
-                      请人工复核机翻质量后再合并。
+                      自检已通过，请人工复核机翻质量后合并以正式发布。
                   labels: i18n,automated
                   add-paths: |
                       ${{ env.CONTENT_ROOT }}/**
