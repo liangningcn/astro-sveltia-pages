@@ -68,6 +68,12 @@ section below.
   only gaps are filled), so an interrupted batch can be re-run safely.
 - Added an `autoTranslate` boolean field to the `posts` and `authors` collections
   in the example so the opt-out is toggleable from the CMS UI (defaults to `true`).
+- The change-detection step now also skips **draft** entries (frontmatter
+  `draft: true`) and **template** files (`_template.md`, `template.md`, or files
+  under `templates/` / `_templates/`) so they are published in English but never
+  sent for translation. Added an instruction telling the translation model to
+  preserve existing human-edited translations and only update segments whose
+  English source changed (prevents CI from clobbering manual fixes to translations).
 
 ---
 

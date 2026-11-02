@@ -54,6 +54,10 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   运行具备增量续翻能力（读取仓库中已有译文、只补缺失部分），中断后可安全重跑。
 - 在 example 的 `posts` 与 `authors` 集合加入 `autoTranslate` 布尔字段，使该开关可在
   CMS 界面勾选（默认开启）。
+- 变更检测步骤新增自动排除：**草稿**（`draft: true`）与**模板文件**
+  （`_template.md` / `template.md` 或 `templates/` / `_templates/` 目录下），
+  这些条目仍以英文发布、只是不送翻。同时给翻译模型加入指令：保留已有的人工译文，
+  仅更新“英文源发生变动”的段落，避免 CI 把人工修正的机翻整体覆盖重写。
 
 ---
 

@@ -21,6 +21,8 @@
 #    它们会被原样复制、永不被送翻。
 #    不触发翻译：单篇在 frontmatter 设 `autoTranslate: false`；
 #    全局暂停：把本文件 env.AUTO_TRANSLATE 改为 "false"。
+#    自动排除：草稿（frontmatter draft:true）、模板文件（_template.md / templates 目录）
+#    在检测阶段即跳过（这些条目仍以英文发布，只是不送翻）。
 #    存量站引导：已存在的 EN 文件不会自动翻译。到 Actions → i18n-translate → Run workflow，
 #    勾选 force 并填 scope（如 posts / products）分批翻译；中断重跑会增量续翻已有译文。
 # ───────────────────────────────────────────────────────────────────
@@ -102,12 +104,22 @@ jobs:
                   if [ -n "$SCOPE" ]; then
                     MAP=$(printf '%s\n' "$MAP" | grep -E "$SCOPE" || true)
                   fi
-                  # 单篇开关：frontmatter 含 `autoTranslate: false` 的条目排除（不触发翻译）
-                  # 在 CMS 里加一个布尔字段 autoTranslate 即可勾选；默认翻译。
+                  # 排除规则（命中任一即跳过该条目，但仍以英文发布）：
+                  #  - 模板文件：_template.md / template.md，或位于 templates/_templates 目录
+                  #  - 草稿：frontmatter 含 `draft: true`
+                  #  - 单篇开关：frontmatter 含 `autoTranslate: false`（CMS 可勾选）
                   KEEP=""
                   for f in $MAP; do
-                    if head -n 40 "$f" | grep -q '^autoTranslate:[[:space:]]*false[[:space:]]*$'; then
-                      echo "跳过（autoTranslate:false）: $f"
+                    skip=0
+                    base=$(basename "$f")
+                    case "$base" in
+                      _template.md|template.md) skip=1 ;;
+                    esac
+                    if printf '%s' "$f" | grep -qE '/(templates|_templates)/'; then skip=1; fi
+                    if head -n 40 "$f" | grep -q '^draft:[[:space:]]*true[[:space:]]*$'; then skip=1; fi
+                    if head -n 40 "$f" | grep -q '^autoTranslate:[[:space:]]*false[[:space:]]*$'; then skip=1; fi
+                    if [ "$skip" = "1" ]; then
+                      echo "跳过（模板/草稿/autoTranslate:false）: $f"
                     else
                       KEEP="$KEEP$f"$'\n'
                     fi
@@ -136,6 +148,8 @@ jobs:
                   instructions: |
                       仅翻译正文与可翻译字段；
                       严禁翻译：slug、图片/媒体路径、以 http(s):// 开头的外链、代码块与行内代码。
+                      保留人工译文：目标语言文件中若已有人工修正的译文，只更新“英文源发生变动”的段落，
+                      未变动段落必须原样保留，绝不允许整体覆盖重写已有译文。
                   glossary_file: i18n/glossary.md # 品牌名/术语白名单（保持不变）
                   # 限流/分片调优（按需打开，缓解 DeepSeek/OpenAI 速率限制）：
                   # max_translation_tokens: 8000   # 单篇超长时分片，单次调用 token 上限
