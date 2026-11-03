@@ -74,6 +74,14 @@ section below.
   sent for translation. Added an instruction telling the translation model to
   preserve existing human-edited translations and only update segments whose
   English source changed (prevents CI from clobbering manual fixes to translations).
+- Switched the translation workflow's default engine to **DeepSeek** (OpenAI-compatible
+  endpoint `https://api.deepseek.com`) via `openai_api_key`/`openai_api_base` and
+  `model_alias: "translation: openai:deepseek-v4-flash"`. `deepseek-v4-flash` is the
+  non-thinking tier (cheapest, low latency, 128K context) and the right fit for
+  bulk Markdown translation; `deepseek-v4-pro`/`reasoner` are excluded as they add
+  cost/latency with no translation benefit. GitHub Models remains a commented
+  fallback. Credentials live in repo Secrets (`DEEPSEEK_API_KEY`); Baidu Translate
+  is documented as a non-LLM fallback that cannot drive pelikhan directly.
 
 ---
 

@@ -58,6 +58,13 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   （`_template.md` / `template.md` 或 `templates/` / `_templates/` 目录下），
   这些条目仍以英文发布、只是不送翻。同时给翻译模型加入指令：保留已有的人工译文，
   仅更新“英文源发生变动”的段落，避免 CI 把人工修正的机翻整体覆盖重写。
+- 将翻译工作流的默认引擎切换为 **DeepSeek**（OpenAI 兼容端点
+  `https://api.deepseek.com`），通过 `openai_api_key` / `openai_api_base`
+  接入，并用 `model_alias: "translation: openai:deepseek-v4-flash"` 指定模型。
+  `deepseek-v4-flash` 为非思维模式（最便宜、低延迟、128K 上下文），最契合批量
+  Markdown 翻译；`deepseek-v4-pro` / `reasoner` 会增加成本与延迟而对翻译无益，故不选。
+  GitHub Models 保留为注释形式的回退方案。凭证位于仓库 Secrets（`DEEPSEEK_API_KEY`）；
+  百度翻译作为非 LLM 的降级方案记录在案——它无法直接驱动 pelikhan。
 
 ---
 

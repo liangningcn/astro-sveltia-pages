@@ -25,6 +25,23 @@
 #    在检测阶段即跳过（这些条目仍以英文发布，只是不送翻）。
 #    存量站引导：已存在的 EN 文件不会自动翻译。到 Actions → i18n-translate → Run workflow，
 #    勾选 force 并填 scope（如 posts / products）分批翻译；中断重跑会增量续翻已有译文。
+#
+# ── API 凭证（仓库 Settings → Secrets and variables → Actions → New repository secret）──
+#   本工作流默认走 DeepSeek（OpenAI 兼容端点）作为翻译引擎：
+#     • DEEPSEEK_API_KEY   —— DeepSeek API Key（sk- 开头）。
+#        申请：platform.deepseek.com → API Keys → Create new API key，复制后立即保存（只显示一次）。
+#        填到：本文件第 2) 步的 secrets.DEEPSEEK_API_KEY，端点 https://api.deepseek.com 已写死。
+#
+#   百度翻译（备用/降级，非 LLM、无法直接驱动 pelikhan，见下方说明）：
+#     • BAIDU_TRANSLATE_APP_ID    —— 百度翻译开放平台 APP ID。
+#     • BAIDU_TRANSLATE_SECRET    —— 百度翻译开放平台密钥（用于生成签名）。
+#        申请：fanyi-api.baidu.com → 管理控制台 → 开通“通用翻译API” → 开发者信息处获取 APP ID 与密钥。
+#        填到：若后续接百度降级脚本，在脚本里用 secrets.BAIDU_TRANSLATE_APP_ID / secrets.BAIDU_TRANSLATE_SECRET。
+#
+#   ⚠️ 百度翻译是传统 NMT REST API（https://fanyi-api.baidu.com/api/trans/vip/translate），
+#      非 OpenAI 兼容、无 AST/字段级感知，无法直接被 pelikhan 调用。
+#      它只能作为 DeepSeek 限流/失败时的“降级通道”，由独立脚本翻译纯文本（会丢失代码块/字段保护等能力），
+#      故本工作流默认不启用；需要时在“失败处理”步骤后追加百度降级 job 即可。
 # ───────────────────────────────────────────────────────────────────
 
 name: i18n-translate
@@ -49,7 +66,9 @@ on:
 permissions:
     contents: write
     pull-requests: write
-    models: read # 若使用 GitHub Models 免费额度（pelikhan 默认）
+    # 默认走 DeepSeek（OpenAI 兼容端点），不需要 models: read。
+    # 仅当回退到 GitHub Models 免费额度时才取消下一行注释。
+    # models: read
 
 # 串行执行：避免同一时间多篇文章发布导致多个翻译 Job 并发打爆翻译 API 限流。
 # cancel-in-progress:false → 后到的发布排队逐个完成（不互相取消、不丢进度、不错乱）。
@@ -129,20 +148,24 @@ jobs:
                   echo "待翻译文件: $FILES"
 
             # ── 2) 翻译：复用现成 Action（remark AST 解析，代码块/链接天然保留）──
-            # 默认走 GitHub Models（GITHUB_TOKEN + models:read，有免费额度）。
-            # 生产环境 16 语言建议改用 DeepSeek/OpenAI，避免 GitHub Models 限流：
-            #   with:
-            #     openai_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
-            #     openai_api_base: https://api.deepseek.com
+            # 主用 DeepSeek（OpenAI 兼容端点）：廉价、128K 上下文、非思维模式，专为翻译/批量而生。
+            # 凭证：仓库 Settings → Secrets → DEEPSEEK_API_KEY（sk- 开头，见文件顶部“API 凭证”）。
             - name: Translate via pelikhan/action-continuous-translation
               if: steps.changes.outputs.files != ''
               uses: pelikhan/action-continuous-translation@v0
               continue-on-error: true # 单语言失败不阻断其余语言
               with:
-                  github_token: ${{ secrets.GITHUB_TOKEN }}
                   source: en
                   lang: ${{ env.TARGET_LANGS }} # 一次输出全部 15 种语言
                   files: ${{ steps.changes.outputs.files }} # 仅处理变更文件
+                  # ── DeepSeek 接线（OpenAI 兼容端点）──
+                  openai_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
+                  openai_api_base: https://api.deepseek.com
+                  # 模型选择：deepseek-v4-flash（非思维模式，最便宜、低延迟、128K 上下文）。
+                  # 不要用 deepseek-v4-pro / deepseek-reasoner —— 推理模式对翻译无益、更慢更贵。
+                  # GenAIScript 模型 id 格式为 provider:model；openai_api_base 已指向 DeepSeek，
+                  # 故这里写 openai:deepseek-v4-flash（已按官方文档核对，无需再改）。
+                  model_alias: "translation: openai:deepseek-v4-flash"
                   # 默认 filename_template 产出 content/{slug}.{lang}.md（紧邻源文件），
                   # 后续由 scripts/remap-translations.sh 映射到 Sveltia 结构。
                   instructions: |
@@ -151,11 +174,14 @@ jobs:
                       保留人工译文：目标语言文件中若已有人工修正的译文，只更新“英文源发生变动”的段落，
                       未变动段落必须原样保留，绝不允许整体覆盖重写已有译文。
                   glossary_file: i18n/glossary.md # 品牌名/术语白名单（保持不变）
-                  # 限流/分片调优（按需打开，缓解 DeepSeek/OpenAI 速率限制）：
+                  # 限流/分片调优（按需打开，缓解 DeepSeek 速率限制）：
                   # max_translation_tokens: 8000   # 单篇超长时分片，单次调用 token 上限
                   # max_validation_tokens: 4000    # 质量自检分片上限
                   # 注：串行锁已保证“跨 run 不并发”；若单 run 内 15 语言仍触发 429，
-                  #     调小上方数值或显式指定较慢的模型。
+                  #     调小上方数值或改回 GitHub Models（见下方回退注释）。
+                  # ── 回退到 GitHub Models 免费额度（需上方 permissions 加 models: read）──
+                  # github_token: ${{ secrets.GITHUB_TOKEN }}
+                  # 并把上方 openai_* 与 model_alias 三行注释掉即可。
 
             # ── 3) 路径适配：把 Action 默认输出映射到 Sveltia 的 i18n 文件结构 ──
             # multiple_files 结构（content/{slug}.{lang}.md）可注释掉此步；
