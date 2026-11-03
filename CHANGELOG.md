@@ -82,6 +82,28 @@ section below.
   cost/latency with no translation benefit. GitHub Models remains a commented
   fallback. Credentials live in repo Secrets (`DEEPSEEK_API_KEY`); Baidu Translate
   is documented as a non-LLM fallback that cannot drive pelikhan directly.
+- Hardened and optimized the translation workflow (0.3.2 follow-up):
+    - **Detect → matrix-translate → publish** pipeline. The translate stage now runs
+      in parallel **matrix shards** of `CHUNK_SIZE` files, so a large `force` bootstrap
+      no longer risks the 6-hour timeout or a single oversized parameter set; disjoint
+      shards commit to one shared `i18n/batch-<run>` branch and are merged once.
+    - **(1) Cache restored**: `.genaiscript/cache` is now restored via `actions/cache`
+      so incremental translation state persists across runs (faster, cheaper tokens).
+    - **(2) Failure alerting**: if any translate/publish step fails, an issue is
+      auto-created (`labels: i18n, ci-failure`) so silent failures are surfaced
+      instead of going unnoticed in the Actions log.
+    - **(3) Single-source-of-truth validation**: the Sveltia config's `locales` must
+      match the workflow's `TARGET_LANGS`; a mismatch fails the run with a clear diff
+      (point `CONFIG_FILE` at your config). Set once, never drift.
+    - **(4) `authors` excluded from translation**: the push trigger now watches only
+      `posts/**/en/**`, and `SKIP_COLLECTIONS: authors` guards force-mode too. Removed
+      the misleading `autoTranslate` field from `authors` (kept on `posts`).
+    - **(5) Fixed the remap script's `multiple_files` handling**: pelikhan always emits
+      under `en/`, so both layouts now move the translation out of `en/` (folders →
+      `{lang}/`, files → collection root). The previous "no move needed" comment was wrong.
+    - **(6) Hardened publish**: `git push --force-with-lease` + retry loop against
+      `origin/main` (and per-shard against the batch branch) prevents rebase/push races
+      when `main` moves while a run is in flight.
 
 ---
 

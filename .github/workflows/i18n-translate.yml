@@ -4,14 +4,14 @@
 # 方案: 选项 A —— 复用 pelikhan/action-continuous-translation 作为翻译引擎。
 #
 # 目标: Sveltia CMS 编辑只维护英文源文件；本工作流在 EN 源变更时，
-#       增量翻译为 15 个目标语言，并“自检通过后直接发布到 main”（无需 CMS 二次操作）。
+#       增量翻译为目标语言，并“自检通过后直接发布到 main”（无需 CMS 二次操作）。
 #       通过 env.PUBLISH_MODE 可切换为开 PR 待人工合并。
 #
 # ── 接入说明 ───────────────────────────────────────────────────────
 # 本仓库的 `example/` 已作为内置 dogfood 启用了上述配置，路径即默认值，
 # 无需改动即可直接验证。接入你自己的站点时改两处：
-# 1) 下方 `on.push.paths` 与 `Detect changed EN sources` 步骤里的
-#    `example/src/content/**/en/**` 改成你真实站点的英文源内容路径。
+# 1) 下方 `on.push.paths` 与 env.CONTENT_ROOT 改成你真实站点的英文源内容路径。
+#    （本例只监听 posts 集合；authors 等“不翻译”集合已在 env.SKIP_COLLECTIONS 排除。）
 # 2) Sveltia 侧配置（关键）：
 #      i18n:
 #        structure: multiple_folders   # 或 multiple_files
@@ -25,12 +25,13 @@
 #    在检测阶段即跳过（这些条目仍以英文发布，只是不送翻）。
 #    存量站引导：已存在的 EN 文件不会自动翻译。到 Actions → i18n-translate → Run workflow，
 #    勾选 force 并填 scope（如 posts / products）分批翻译；中断重跑会增量续翻已有译文。
+#    大站 force：自动按 env.CHUNK_SIZE 切片并行翻译，避免单次 6h 超时 / 参数溢出。
 #
 # ── API 凭证（仓库 Settings → Secrets and variables → Actions → New repository secret）──
 #   本工作流默认走 DeepSeek（OpenAI 兼容端点）作为翻译引擎：
 #     • DEEPSEEK_API_KEY   —— DeepSeek API Key（sk- 开头）。
 #        申请：platform.deepseek.com → API Keys → Create new API key，复制后立即保存（只显示一次）。
-#        填到：本文件第 2) 步的 secrets.DEEPSEEK_API_KEY，端点 https://api.deepseek.com 已写死。
+#        填到：本文件翻译步骤的 secrets.DEEPSEEK_API_KEY，端点 https://api.deepseek.com 已写死。
 #
 #   百度翻译（备用/降级，非 LLM、无法直接驱动 pelikhan，见下方说明）：
 #     • BAIDU_TRANSLATE_APP_ID    —— 百度翻译开放平台 APP ID。
@@ -47,11 +48,12 @@
 name: i18n-translate
 
 on:
-    # 只监听英文源文件；译文文件不会再次触发，天然避免回环
+    # 只监听“需要翻译的集合”的英文源文件（本例仅 posts）；
+    # 译文文件不会再次触发，天然避免回环。authors 等集合已排除。
     push:
         branches: [main]
         paths:
-            - "example/src/content/**/en/**" # ← 改成你的 content 英文源路径
+            - "example/src/content/posts/**/en/**" # ← 改成你的 content 英文源路径（仅需翻译的集合）
     workflow_dispatch:
         inputs:
             force:
@@ -66,12 +68,14 @@ on:
 permissions:
     contents: write
     pull-requests: write
+    issues: write # 翻译失败时由 alert 步骤自动建 issue
     # 默认走 DeepSeek（OpenAI 兼容端点），不需要 models: read。
     # 仅当回退到 GitHub Models 免费额度时才取消下一行注释。
     # models: read
 
-# 串行执行：避免同一时间多篇文章发布导致多个翻译 Job 并发打爆翻译 API 限流。
+# 串行执行：避免同一时间多篇文章发布导致多个工作流并发，互相踩 main。
 # cancel-in-progress:false → 后到的发布排队逐个完成（不互相取消、不丢进度、不错乱）。
+# 注意：同一工作流“运行内”的翻译分片（matrix）是并行的，以提升大站吞吐量。
 concurrency:
     group: i18n-translate
     cancel-in-progress: false
@@ -88,86 +92,168 @@ env:
     TARGET_LANGS: "fr,de,es,ja,zh,pt,ru,ar,ko,it,nl,pl,tr,vi,th"
     CONTENT_ROOT: "example/src/content" # ← 改成你的 content 根目录
     I18N_STRUCTURE: "multiple_folders" # multiple_folders | multiple_files
+    # 不翻译的集合（force 模式下也不会被送翻；push 模式下已由 paths 排除）。
+    # 多个集合用逗号分隔，如 "authors,products_meta"。
+    SKIP_COLLECTIONS: "authors"
+    # 大站切片：单次翻译最多处理的文件数，超出自动拆成并行分片（避免 6h 超时 / 参数溢出）。
+    CHUNK_SIZE: "20"
+    # 语言单一来源校验：填 Sveltia 配置文件路径，工作流会校验其 locales 与 TARGET_LANGS 一致；
+    # 留空则跳过校验。配置才是“唯一事实来源”，改语言只改这里。
+    CONFIG_FILE: "example/astro.config.mjs"
 
 jobs:
-    translate:
-        runs-on: ubuntu-latest
-        # 防御：本工作流自提交若误命中 main 也不重跑（PR 模式下实际不会命中）
+    # ── 阶段 1：检测变更 + 过滤 + 切片（单 job，输出 JSON 分片列表）──
+    detect:
         if: github.actor != 'github-actions[bot]'
+        runs-on: ubuntu-latest
+        outputs:
+            chunks: ${{ steps.detect.outputs.chunks }}
+            has_files: ${{ steps.detect.outputs.has_files }}
         steps:
             - uses: actions/checkout@v4
               with:
                   fetch-depth: 0 # 需要 before/after 两个 SHA 做增量差异
 
-            # ── 1) 增量检测：仅取出变更的英文源文件，并过滤掉“不翻译”的条目 ──
-            - name: Detect changed EN sources
-              id: changes
+            # 语言单一来源校验：Sveltia 配置的 locales 必须与 TARGET_LANGS 完全一致，
+            # 否则直接失败并给出两边差异，防止“只改一边导致静默失效”。
+            - name: Validate TARGET_LANGS against Sveltia config
+              if: env.CONFIG_FILE != ''
               run: |
-                  # 全局开关：AUTO_TRANSLATE != true 时整体暂停翻译
-                  if [ "${AUTO_TRANSLATE:-true}" != "true" ]; then
-                    echo "AUTO_TRANSLATE=false，已暂停翻译"
-                    echo "files=" >> "$GITHUB_OUTPUT"
-                    exit 0
-                  fi
-                  if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.inputs.force }}" = "true" ]; then
-                    # 强制全量：列出所有英文源（存量站批量引导用）
-                    MAP=$(git ls-files | grep -E "^${CONTENT_ROOT}/.+/en/.+\.md$" || true)
-                  else
-                    # 增量：与本次 push 之前的状态比较
-                    MAP=$(git diff --name-only "${{ github.event.before }}" "${{ github.event.after }}" \
-                          | grep -E "^${CONTENT_ROOT}/.+/en/.+\.md$" || true)
-                  fi
-                  # 应用 scope 限定（仅 workflow_dispatch 时可指定，留空=不过滤）。
-                  # 例：scope=posts 只翻博客；scope=products 只翻产品；分批引导避免单次超时/限流。
-                  SCOPE="${{ github.event.inputs.scope }}"
-                  if [ -n "$SCOPE" ]; then
-                    MAP=$(printf '%s\n' "$MAP" | grep -E "$SCOPE" || true)
-                  fi
-                  # 排除规则（命中任一即跳过该条目，但仍以英文发布）：
-                  #  - 模板文件：_template.md / template.md，或位于 templates/_templates 目录
-                  #  - 草稿：frontmatter 含 `draft: true`
-                  #  - 单篇开关：frontmatter 含 `autoTranslate: false`（CMS 可勾选）
-                  KEEP=""
-                  for f in $MAP; do
-                    skip=0
-                    base=$(basename "$f")
-                    case "$base" in
-                      _template.md|template.md) skip=1 ;;
-                    esac
-                    if printf '%s' "$f" | grep -qE '/(templates|_templates)/'; then skip=1; fi
-                    if head -n 40 "$f" | grep -q '^draft:[[:space:]]*true[[:space:]]*$'; then skip=1; fi
-                    if head -n 40 "$f" | grep -q '^autoTranslate:[[:space:]]*false[[:space:]]*$'; then skip=1; fi
-                    if [ "$skip" = "1" ]; then
-                      echo "跳过（模板/草稿/autoTranslate:false）: $f"
-                    else
-                      KEEP="$KEEP$f"$'\n'
-                    fi
-                  done
-                  FILES=$(printf '%s' "$KEEP" | sed '/^$/d' | paste -sd ';' -)   # pelikhan 用分号分隔
-                  echo "files=$FILES" >> "$GITHUB_OUTPUT"
-                  echo "待翻译文件: $FILES"
+                  node <<'NODE'
+                  const fs = require('fs');
+                  const p = process.env.CONFIG_FILE;
+                  if (!p || !fs.existsSync(p)) { console.log('CONFIG_FILE 未设置/不存在，跳过校验'); process.exit(0); }
+                  const s = fs.readFileSync(p, 'utf8');
+                  const dl = s.match(/default_locale:\s*"(\w+)"/);
+                  const locs = [...s.matchAll(/locale:\s*"([^"]+)"/g)].map(m => m[1]);
+                  if (!dl || !locs.length) { console.log('未在配置中找到 locales，跳过校验'); process.exit(0); }
+                  const target = locs.filter(l => l !== dl[1]).sort();
+                  const want = (process.env.TARGET_LANGS || '').split(',').map(x => x.trim()).filter(Boolean).sort();
+                  const a = JSON.stringify(target), b = JSON.stringify(want);
+                  if (a !== b) {
+                    console.error('❌ 语言列表不一致！');
+                    console.error('  Sveltia 配置(' + dl[1] + '): ' + target.join(','));
+                    console.error('  TARGET_LANGS        : ' + want.join(','));
+                    process.exit(1);
+                  }
+                  console.log('✅ 语言列表一致: ' + target.join(','));
+                  NODE
 
-            # ── 2) 翻译：复用现成 Action（remark AST 解析，代码块/链接天然保留）──
+            # 检测变更 EN 源 → 应用排除规则 → 切片为并行分片
+            - name: Detect & split EN sources
+              id: detect
+              env:
+                  AUTO_TRANSLATE: ${{ env.AUTO_TRANSLATE }}
+                  CONTENT_ROOT: ${{ env.CONTENT_ROOT }}
+                  TARGET_LANGS: ${{ env.TARGET_LANGS }}
+                  SKIP_COLLECTIONS: ${{ env.SKIP_COLLECTIONS }}
+                  CHUNK_SIZE: ${{ env.CHUNK_SIZE }}
+                  FORCE: ${{ github.event.inputs.force }}
+                  SCOPE: ${{ github.event.inputs.scope }}
+                  GH_EVENT: ${{ github.event_name }}
+                  BEFORE: ${{ github.event.before }}
+                  AFTER: ${{ github.event.after }}
+              run: |
+                  node <<'NODE'
+                  const { execSync } = require('child_process');
+                  const fs = require('fs');
+                  const path = require('path');
+                  const sh = c => execSync(c, { encoding: 'utf8' }).trim();
+                  const out = process.env.GITHUB_OUTPUT;
+                  const write = (k, v) => fs.appendFileSync(out, `${k}=${v}\n`);
+
+                  // 全局开关
+                  if ((process.env.AUTO_TRANSLATE || 'true') !== 'true') {
+                    console.log('AUTO_TRANSLATE=false，已暂停翻译');
+                    write('chunks', '[]'); write('has_files', 'false'); process.exit(0);
+                  }
+
+                  const cr = process.env.CONTENT_ROOT;
+                  const re = new RegExp('^' + cr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/.+/en/.+\\.md$');
+                  let map;
+                  if (process.env.GH_EVENT === 'workflow_dispatch' || process.env.FORCE === 'true') {
+                    // 强制全量（存量站引导）：列出所有英文源
+                    map = sh(`git ls-files | grep -E "${re.source}"`).split('\n').filter(Boolean);
+                  } else {
+                    // 增量：与本次 push 之前的状态比较
+                    map = sh(`git diff --name-only "${process.env.BEFORE}" "${process.env.AFTER}"`)
+                      .split('\n').filter(Boolean).filter(f => re.test(f));
+                  }
+
+                  // scope 限定（workflow_dispatch 时可指定；留空=不过滤）
+                  const scope = process.env.SCOPE || '';
+                  if (scope) map = map.filter(f => new RegExp(scope).test(f));
+
+                  // 排除集合（如 authors）—— push 已排除，此处为 force 模式兜底
+                  const skip = (process.env.SKIP_COLLECTIONS || '')
+                    .split(',').map(s => s.trim()).filter(Boolean).map(c => new RegExp('/' + c + '/'));
+
+                  const keep = [];
+                  for (const f of map) {
+                    let s = false;
+                    const base = path.basename(f);
+                    if (base === '_template.md' || base === 'template.md') s = true;
+                    if (/\/(templates|_templates)\//.test(f)) s = true;
+                    if (skip.some(rx => rx.test(f))) s = true;
+                    if (!s) {
+                      const h = sh(`head -n 40 "${f}"`);
+                      if (/^draft:\s*true\s*$/m.test(h)) s = true;          // 草稿不翻
+                      if (/^autoTranslate:\s*false\s*$/m.test(h)) s = true; // 单篇开关
+                    }
+                    if (s) console.log('跳过（模板/草稿/autoTranslate:false/集合排除）: ' + f);
+                    else keep.push(f);
+                  }
+
+                  if (keep.length === 0) { write('chunks', '[]'); write('has_files', 'false'); process.exit(0); }
+
+                  // 切片为并行分片
+                  const N = parseInt(process.env.CHUNK_SIZE || '20', 10);
+                  const chunks = [];
+                  for (let i = 0; i < keep.length; i += N) {
+                    chunks.push({ i: Math.floor(i / N), files: keep.slice(i, i + N).join(';') });
+                  }
+                  write('chunks', JSON.stringify(chunks));
+                  write('has_files', 'true');
+                  console.log('待翻译 ' + keep.length + ' 个文件，分 ' + chunks.length + ' 片');
+                  NODE
+
+    # ── 阶段 2：并行翻译分片（matrix 按 detect 输出的分片并发）──
+    translate:
+        needs: detect
+        if: needs.detect.outputs.has_files == 'true'
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                # chunks 为 [{i, files}] 数组，每个元素是一个分片
+                include: ${{ fromJSON(needs.detect.outputs.chunks) }}
+            fail-fast: false # 一个分片失败不影响其余分片（失败由 alert 步骤汇总）
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            # (优化1) 恢复翻译缓存：pelikhan 增量依赖仓库已有译文，缓存进一步加速/省 token
+            - name: Restore translation cache
+              uses: actions/cache@v4
+              with:
+                  path: .genaiscript/cache
+                  key: i18n-${{ runner.os }}-${{ github.run_id }}-${{ matrix.i }}
+                  restore-keys: |
+                      i18n-${{ runner.os }}-
+
+            # 翻译：复用现成 Action（remark AST 解析，代码块/链接天然保留）
             # 主用 DeepSeek（OpenAI 兼容端点）：廉价、128K 上下文、非思维模式，专为翻译/批量而生。
-            # 凭证：仓库 Settings → Secrets → DEEPSEEK_API_KEY（sk- 开头，见文件顶部“API 凭证”）。
-            - name: Translate via pelikhan/action-continuous-translation
-              if: steps.changes.outputs.files != ''
+            - name: Translate chunk ${{ matrix.i }}
               uses: pelikhan/action-continuous-translation@v0
-              continue-on-error: true # 单语言失败不阻断其余语言
               with:
                   source: en
-                  lang: ${{ env.TARGET_LANGS }} # 一次输出全部 15 种语言
-                  files: ${{ steps.changes.outputs.files }} # 仅处理变更文件
-                  # ── DeepSeek 接线（OpenAI 兼容端点）──
+                  lang: ${{ env.TARGET_LANGS }} # 一次输出全部目标语言
+                  files: ${{ matrix.files }} # 仅本分片的变更文件（分号分隔）
                   openai_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
                   openai_api_base: https://api.deepseek.com
-                  # 模型选择：deepseek-v4-flash（非思维模式，最便宜、低延迟、128K 上下文）。
-                  # 不要用 deepseek-v4-pro / deepseek-reasoner —— 推理模式对翻译无益、更慢更贵。
-                  # GenAIScript 模型 id 格式为 provider:model；openai_api_base 已指向 DeepSeek，
-                  # 故这里写 openai:deepseek-v4-flash（已按官方文档核对，无需再改）。
+                  # deepseek-v4-flash（非思维模式，最便宜、低延迟、128K 上下文）。
+                  # GenAIScript 模型 id 格式为 provider:model；openai_api_base 已指向 DeepSeek，故写 openai:deepseek-v4-flash。
                   model_alias: "translation: openai:deepseek-v4-flash"
-                  # 默认 filename_template 产出 content/{slug}.{lang}.md（紧邻源文件），
-                  # 后续由 scripts/remap-translations.sh 映射到 Sveltia 结构。
                   instructions: |
                       仅翻译正文与可翻译字段；
                       严禁翻译：slug、图片/媒体路径、以 http(s):// 开头的外链、代码块与行内代码。
@@ -177,69 +263,116 @@ jobs:
                   # 限流/分片调优（按需打开，缓解 DeepSeek 速率限制）：
                   # max_translation_tokens: 8000   # 单篇超长时分片，单次调用 token 上限
                   # max_validation_tokens: 4000    # 质量自检分片上限
-                  # 注：串行锁已保证“跨 run 不并发”；若单 run 内 15 语言仍触发 429，
-                  #     调小上方数值或改回 GitHub Models（见下方回退注释）。
-                  # ── 回退到 GitHub Models 免费额度（需上方 permissions 加 models: read）──
-                  # github_token: ${{ secrets.GITHUB_TOKEN }}
-                  # 并把上方 openai_* 与 model_alias 三行注释掉即可。
 
-            # ── 3) 路径适配：把 Action 默认输出映射到 Sveltia 的 i18n 文件结构 ──
-            # multiple_files 结构（content/{slug}.{lang}.md）可注释掉此步；
-            # multiple_folders 结构（content/{lang}/{slug}.md）需要此步。
+            # 路径适配：把 Action 默认输出映射到 Sveltia 的 i18n 文件结构
             - name: Remap to Sveltia layout
               if: env.I18N_STRUCTURE == 'multiple_folders'
               run: bash scripts/remap-translations.sh "$TARGET_LANGS" "$CONTENT_ROOT" "$I18N_STRUCTURE"
 
-            # ── 4) 发布方式（仅在翻译 step 自检通过、outcome==success 时执行）──
-            # PUBLISH_MODE=commit（默认）：译文直接 commit 到 main，站点自动重建即“正式发布”，
-            #   无需 CMS 二次点击；Sveltia 后台也不再需要“发布”按钮。
-            #   （译文文件均非 en 路径，不会再次触发本工作流，天然无回环。）
-            - name: Self-check & publish to main (commit mode)
-              if: steps.translate.outcome == 'success' && env.PUBLISH_MODE == 'commit'
+            # (优化6) 自检 + 提交到共享 batch 分支（带 --force-with-lease 与重试，防并发/手推冲突）
+            - name: Self-check & commit to batch branch
               run: |
-                  # 步骤 3 已完成路径重映射（multiple_folders）。此处仅做发布前自检 + 提交。
-                  if [ -z "$(git status --porcelain "$CONTENT_ROOT")" ]; then
-                    echo "无译文产出，跳过发布"; exit 0
-                  fi
-                  # 自检：任意“非英文”译文文件为空 → 视为翻译不完整，终止发布（不写脏数据）
-                  EMPTY=$(find "$CONTENT_ROOT" -name '*.md' ! -path '*/en/*' -size 0 2>/dev/null || true)
-                  if [ -n "$EMPTY" ]; then
-                    echo "存在空译文，终止发布："; echo "$EMPTY"; exit 1
-                  fi
+                  set -uo pipefail
+                  BR="i18n/batch-${{ github.run_id }}"
+                  git add -A "$CONTENT_ROOT"
+                  # 自检：本分片暂存的“非英文”译文若有空文件 → 视为不完整，终止（不写脏数据）
+                  EMPTY=$(git diff --cached --name-only "$CONTENT_ROOT" 2>/dev/null | grep -v '/en/' | while IFS= read -r f; do [ -f "$f" ] && [ ! -s "$f" ] && echo "$f"; done || true)
+                  if [ -n "$EMPTY" ]; then echo "存在空译文，终止发布："; echo "$EMPTY"; exit 1; fi
+                  if [ -z "$(git diff --cached --name-only "$CONTENT_ROOT")" ]; then echo "本分片无译文变动，跳过提交"; exit 0; fi
                   git config user.name "i18n-bot"
                   git config user.email "i18n-bot@users.noreply.github.com"
-                  git add -A "$CONTENT_ROOT"
-                  git commit -m "i18n: auto-translate EN → ${{ env.TARGET_LANGS }}"
-                  # 串行锁 + rebase 到最新 main，避免与并行合并冲突导致 push 失败
-                  git fetch origin main
-                  git rebase origin/main
-                  git push origin HEAD:main
+                  git fetch origin "$BR" || true
+                  git checkout -B "$BR" "origin/$BR" 2>/dev/null || git checkout -b "$BR"
+                  git commit -m "i18n: shard ${{ matrix.i }} (EN → ${{ env.TARGET_LANGS }})"
+                  ok=0
+                  for n in 1 2 3 4 5; do
+                    git fetch origin "$BR" || true
+                    if git rebase "origin/$BR" >/dev/null 2>&1 && git push --force-with-lease origin "$BR"; then ok=1; break; fi
+                    sleep 4
+                  done
+                  if [ "$ok" -ne 1 ]; then echo "推送 batch 分支失败"; exit 1; fi
 
-            # PUBLISH_MODE=pr：改为开 PR 待人工合并（保留复核闸门）
+            # 调试日志（每分片留存，便于排查未完成的 (locale, file)）
+            - name: Upload translation logs
+              if: always()
+              run: mkdir -p .genaiscript/cache
+            - uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: translation-logs-${{ github.run_id }}-${{ matrix.i }}
+                  path: .genaiscript/cache/
+
+    # ── 阶段 3：汇总分片 → 发布（commit 直发 main / pr 待合并）+ 失败告警 ──
+    publish:
+        needs: [detect, translate]
+        if: always() && needs.detect.outputs.has_files == 'true'
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Collect chunk branches
+              id: merge
+              run: |
+                  set -uo pipefail
+                  BR="i18n/batch-${{ github.run_id }}"
+                  git fetch origin "$BR" 2>/dev/null || true
+                  if git rev-parse --verify "origin/$BR" >/dev/null 2>&1; then
+                    git config user.name "i18n-bot"
+                    git config user.email "i18n-bot@users.noreply.github.com"
+                    git checkout -b "$BR" "origin/$BR"
+                    echo "merged=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "无译文产出（batch 分支不存在）"
+                    echo "merged=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+            # 发布方式：commit（默认）直接合并到 main 并推送
+            - name: Publish to main (commit mode)
+              if: steps.merge.outputs.merged == 'true' && env.PUBLISH_MODE == 'commit'
+              run: |
+                  set -uo pipefail
+                  BR="i18n/batch-${{ github.run_id }}"
+                  git fetch origin main
+                  git checkout main
+                  git merge --no-ff "$BR" -m "i18n: auto-translate EN → ${{ env.TARGET_LANGS }}"
+                  ok=0
+                  for n in 1 2 3 4 5; do
+                    git fetch origin main
+                    if git rebase origin/main >/dev/null 2>&1 && git push --force-with-lease origin HEAD:main; then ok=1; break; fi
+                    sleep 4
+                  done
+                  git push origin --delete "$BR" || true
+                  if [ "$ok" -ne 1 ]; then echo "推送 main 失败"; exit 1; fi
+
+            # 发布方式：pr 开 PR 待人工合并（保留复核闸门）
             - name: Open translation PR (pr mode)
-              if: steps.translate.outcome == 'success' && env.PUBLISH_MODE == 'pr'
+              if: steps.merge.outputs.merged == 'true' && env.PUBLISH_MODE == 'pr'
               uses: peter-evans/create-pull-request@v6
               with:
                   token: ${{ secrets.GITHUB_TOKEN }}
+                  base: main
+                  branch: i18n/batch-${{ github.run_id }}
                   commit-message: "i18n: auto-translate from EN sources"
-                  branch: i18n/auto-translate
                   title: "🌐 i18n: 自动翻译（源语言 EN）"
                   body: |
                       由 Sveltia EN 源变更触发，覆盖目标语言：${{ env.TARGET_LANGS }}。
                       自检已通过，请人工复核机翻质量后合并以正式发布。
                   labels: i18n,automated
-                  add-paths: |
-                      ${{ env.CONTENT_ROOT }}/**
 
-            # ── 5) 失败处理 ──
-            # • Action 内部已做质量校验 + 增量缓存：某语言 API 报错/返回不完整时，
-            #   该文件保持原状（不写脏数据），下一次 EN 变更会增量重试。
-            # • 外部 API 限流：用 max_translation_tokens / max_validation_tokens 控制分片；
-            #   必要时在翻译 step 包一层重试（官方 retry action）。
-            # • 把缓存/失败日志作为 artifact 上传，便于排查未完成的 (locale, file)。
-            - name: Upload translation logs
-              if: always()
-              uses: actions/upload-artifact@v4
+            # (优化2) 失败告警：翻译或发布任一步骤失败 → 自动建 issue，避免“静默失败没人知道”
+            - name: Alert on failure (create issue)
+              if: failure() || needs.translate.result == 'failure'
+              uses: actions/github-script@v7
               with:
-                  name: translation-logs
-                  path: .genaiscript/cache/
+                  script: |
+                      const title = `i18n-translate failed: run ${context.runId}`;
+                      const body = `翻译工作流执行失败。\n\n运行链接: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n请检查翻译 API 凭证 (DEEPSEEK_API_KEY)、限流或译文自检。`;
+                      await github.rest.issues.create({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        title,
+                        body,
+                        labels: ['i18n', 'ci-failure']
+                      });

@@ -60,20 +60,13 @@ export default defineConfig({
                     label: "Authors",
                     label_singular: "Author",
                     folder: "src/content/authors",
-                    // 只提交英文源；CI 负责其余语言（见 i18n-translate.yml）。
+                    // 作者集合【不纳入 CI 自动翻译】：push 触发器已排除，force 模式也由
+                    // i18n-translate.yml 的 SKIP_COLLECTIONS=authors 兜底跳过。
                     i18n: { save_all_locales: false, initial_locales: ["en"] },
                     create: true,
                     identifier_field: "name",
                     slug: "{{slug}}",
                     fields: [
-                        // 是否纳入 CI 自动翻译（默认开启）；取消勾选则只上英文、不触发翻译。
-                        {
-                            label: "Auto Translate",
-                            name: "autoTranslate",
-                            widget: "boolean",
-                            default: true,
-                            required: false,
-                        },
                         // 姓名/头像为 locale 无关的引用，原样复制、永不被翻译。
                         {
                             label: "Name",

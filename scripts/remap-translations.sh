@@ -13,11 +13,14 @@
 #     structure:      multiple_folders（默认）| multiple_files
 #
 # 说明:
-#   - pelikhan 默认把译文放在源文件同目录、命名为 {slug}.{lang}.md；
-#     这里把它移动到“与英文源同级的 {lang}/ 目录”下，文件名恢复为 {slug}.md。
-#   - 若你的 Sveltia 使用 multiple_files 结构（content/{slug}.{lang}.md），
-#     把 structure 传 non-multiple_folders，脚本会把译文留在集合目录内、
-#     命名为 {slug}.{lang}.md（即 pelikhan 的默认形态，无需移动）。
+#   - pelikhan 默认把译文放在英文源同级的 en/ 目录下、命名为 {slug}.{lang}.md，
+#     即 content/{collection}/en/{slug}.{lang}.md。
+#   - multiple_folders 结构（content/{collection}/{lang}/{slug}.md）：
+#     移动到“与 en/ 同级的 {lang}/ 目录”，文件名恢复为 {slug}.md。
+#   - multiple_files 结构（content/{collection}/{slug}.{lang}.md）：
+#     同样需要把译文从 en/ 子目录移出到“集合根目录”，文件名保持 {slug}.{lang}.md。
+#     （⚠️ 旧版注释称 multiple_files “无需移动”是错误的：pelikhan 的产出始终在 en/ 内，
+#       无论哪种结构都必须移出 en/。）
 
 set -euo pipefail
 
@@ -33,7 +36,26 @@ fi
 IFS=',' read -ra LANG_ARR <<< "$LANGS"
 
 if [ "$STRUCTURE" != "multiple_folders" ]; then
-  echo "structure=$STRUCTURE：pelikhan 默认产出已符合 multiple_files，无需移动。"
+  # multiple_files: 把译文从 en/ 子目录移出到集合根目录，文件名保持 {slug}.{lang}.md
+  for lang in "${LANG_ARR[@]}"; do
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      dir="$(dirname "$f")"     # .../collection/en
+      parent="$(dirname "$dir")" # .../collection
+      slug="$(basename "$f" ".${lang}.md")"
+      dest="$parent/$slug.${lang}.md"
+      mkdir -p "$parent"
+      if git mv -f "$f" "$dest" 2>/dev/null; then
+        echo "remap (multiple_files): $f -> $dest"
+        moved=$((moved + 1))
+      else
+        mv -f "$f" "$dest"
+        echo "remap (multiple_files, no git): $f -> $dest"
+        moved=$((moved + 1))
+      fi
+    done < <(find "$CONTENT_ROOT" -type f -name "*.${lang}.md" -path '*/en/*')
+  done
+  echo "remap 完成，共移动 $moved 个文件。"
   exit 0
 fi
 

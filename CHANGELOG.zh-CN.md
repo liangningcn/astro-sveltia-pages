@@ -66,6 +66,26 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   GitHub Models 保留为注释形式的回退方案。凭证位于仓库 Secrets（`DEEPSEEK_API_KEY`）；
   百度翻译作为非 LLM 的降级方案记录在案——它无法直接驱动 pelikhan。
 
+### 优化（0.3.2 续）
+
+- 将翻译工作流重构为 **检测 → 矩阵翻译 → 发布** 三段式流水线：
+  翻译阶段按 `CHUNK_SIZE` 切片为并行的 matrix 分片，存量站 `force` 引导不再有
+  6 小时超时或单参数过大的风险；各分片写入同一个 `i18n/batch-<run>` 分支后再一次性合并。
+- **（1）恢复缓存**：通过 `actions/cache` 恢复 `.genaiscript/cache`，使增量翻译状态
+  跨运行保留（更快、更省 token）。
+- **（2）失败告警**：翻译或发布任一步骤失败时自动建 issue（`labels: i18n, ci-failure`），
+  避免“静默失败没人知道”。
+- **（3）语言单一来源校验**：Sveltia 配置里的 `locales` 必须与工作流的 `TARGET_LANGS`
+  完全一致，不一致直接失败并给出两边差异（用 `CONFIG_FILE` 指向你的配置文件）。一次改对，永不漂移。
+- **（4）`authors` 不再翻译**：push 触发器现在只监听 `posts/**/en/**`，`SKIP_COLLECTIONS:
+authors` 在 `force` 模式也兜底跳过；并从 `authors` 集合移除误导性的 `autoTranslate` 字段
+  （保留在 `posts`）。
+- **（5）修正 remap 脚本对 `multiple_files` 的处理**：pelikhan 始终把译文产出在 `en/`
+  下，两种结构都需把译文移出 `en/`（folders → `{lang}/`，files → 集合根目录）。旧注释
+  “无需移动”是错误的。
+- **（6）加固发布**：对 `origin/main`（以及分片对 batch 分支）采用
+  `git push --force-with-lease` + 重试循环，避免运行期间 `main` 被改动导致的 rebase/push 冲突。
+
 ---
 
 ## 0.3.1
