@@ -8,6 +8,53 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.3.4
+
+### 新增
+
+- 将 i18n 自动翻译工作流产品化，消费方不再需要手工复制文件。三份产物
+  （`.github/workflows/i18n-translate.yml`、`i18n/glossary.md`、
+  `scripts/remap-translations.sh`）现作为模板存放于 `templates/i18n/`，并由
+  `vp run build:templates` 复制到 `dist/templates/i18n/`，从而随 npm 包一起发布。
+- 新增 `init:i18n` CLI 命令（亦可写作 `init --i18n`）。它会读取消费方的 Sveltia CMS
+  配置（默认 `sveltia-cms.config.mjs`，可用 `--config` 覆盖），提取
+  `i18n.default_locale`、`i18n.locales`（同时支持 `["en","fr"]` 与
+  `[{locale:"en"}]` 两种写法）以及各集合的 `folder`，自动填充模板占位符
+  （`__CONTENT_ROOT__`、`__COLLECTION_EN_PATH__`、`__TARGET_LANGS__`、
+  `__CONFIG_FILE__`、`__SKIP_COLLECTIONS__`、`__I18N_STRUCTURE__`、
+  `__PROJECT_NAME__`），并写出三份文件。已存在文件默认跳过，除非传入 `--force`；命令还会打印所需的
+  `DEEPSEEK_API_KEY` Secret 与强制的 Sveltia CMS 配置要求。
+- 修复了内置工作流中 `pelikhan/action-continuous-translation` 的兼容性 bug：该 Action
+  会静默丢弃路径中含两位语言目录（如 `/en/`）或文件名带 `.{lang}.` 后缀的文件，导致
+  Sveltia `multiple_folders` 的英文源被过滤掉（“No files or not matching languages
+  selected”）。工作流现改为在翻译前把英文源暂存到扁平的 `.i18n-staging/` 目录（无
+  `/xx/` 语言段），并植入已有译文以支持增量复用，再由 `remap-translations.sh` 回写为
+  `multiple_folders` 结构。
+- 文档新增硬性要求：提交信息中绝不出现方括号包裹的 CI 跳过标记（`[skip ci]`、`[ci skip]`
+  等）。在 GitHub Actions + Cloudflare Pages 上，此类标记会跳过整次 push 的工作流
+  **以及** Cloudflare 部署。
+
+### 变更
+
+- `check:templates` 现会在打包前校验每个 i18n 模板仍包含所需的占位符。
+
+---
+
+## 0.3.3
+
+维护版本，整合了 0.3.2 之后对 i18n 翻译工作流的加固，并钉定正确的 DeepSeek 模型别名：
+
+- 钉定 `model_alias: "translation: openai:deepseek-v4-flash"`，并补充了 `DEEPSEEK_API_KEY`
+  Secret 与 DeepSeek OpenAI 兼容端点的文档。
+- 变更检测现在会跳过草稿条目（`draft: true`）与模板文件，并保留人工润色的已有译文
+  （仅更新英文源发生变动的段落）。
+- 新增可在 CMS 内开关的 `autoTranslate` 字段，以及 `workflow_dispatch` 的 `scope` 输入，
+  用于对存量站点分批、增量地引导翻译。
+- 加固发布流程：恢复 `.genaiscript/cache` 缓存、失败时自动建 issue 告警、语言单一来源
+  校验、翻译排除 `authors` 集合，以及 `force-with-lease` 推送重试。
+
+---
+
 ## 0.3.2
 
 ### 新增

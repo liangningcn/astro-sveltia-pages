@@ -21,6 +21,7 @@ Sveltia CMS, wired into Astro with **zero hand-written CMS config**. Built for C
 - [Content Loader](#content-loader)
 - [Guides](#guides)
     - [Multi-language (i18n)](#multi-language-i18n)
+    - [Automated translation (i18n-translate)](#automated-translation-i18n-translate)
     - [Read-only mode](#read-only-mode)
     - [Singleton files](#singleton-files)
     - [Other promoted options](#other-promoted-options)
@@ -354,6 +355,69 @@ export const collections = {
 - If the CMS config uses `multiple_folders` but you forget to pass `{ locale: "..." }`, the loader throws an explicit error to prevent loading the wrong data.
 - If a specific collection has `i18n: false` in its CMS config, it opts out of localization and loads from the root folder regardless of the global i18n settings.
 
+### Automated translation (i18n-translate)
+
+Once the CMS edits only the English source (see the Sveltia settings below), you can let CI translate every other locale automatically. The package ships a ready-to-use
+[`pelikhan/action-continuous-translation`](https://github.com/pelikhan/action-continuous-translation) workflow (DeepSeek-driven) plus a glossary and a remap helper, and the `init:i18n` command wires them into your repo with zero manual path editing.
+
+1.  From your project root, run:
+
+            ```bash
+            pnpm exec astro-sveltia-pages init:i18n
+            ```
+
+            It auto-detects `sveltia-cms.config.mjs` (override with `--config <path>`), reads
+            `i18n.default_locale`, `i18n.locales` and each collection's `folder`, fills the
+            template placeholders, and writes three files:
+
+            - `.github/workflows/i18n-translate.yml`
+            - `i18n/glossary.md`
+            - `scripts/remap-translations.sh`
+
+            Useful flags:
+
+            - `--content-root <path>` — content root (default `src/content`)
+            - `--default-locale <lang>` — source locale (default `en`)
+            - `--project-name <name>` — used in the glossary heading
+            - `--collections <a,b,c>` — only wire in these collections
+            - `--skip-collections <a,b>` — always exclude these collections
+            - `--force` — overwrite files that already exist
+
+            Existing files are skipped (not overwritten) unless `--force` is given.
+
+2.  Add the GitHub repository secret
+    (**Settings → Secrets and variables → Actions → New repository secret**):
+
+    - `DEEPSEEK_API_KEY` — a DeepSeek API key (`sk-…`) from
+      <https://platform.deepseek.com>. The workflow calls DeepSeek's OpenAI-compatible
+      endpoint `https://api.deepseek.com` with `deepseek-v4-flash`.
+
+3.  In your Sveltia CMS config, **every collection you want auto-translated must set**:
+
+    ```js
+    i18n: { save_all_locales: false, initial_locales: ["en"] }
+    ```
+
+    This makes the CMS commit **only** the English source; CI produces the other
+    locales. Also mark untranslatable fields (`slug`, image paths, …) as
+    `i18n: duplicate`, and make sure the backend does **not** set `skip_ci: true`.
+
+4.  ⚠️ **Commit-message rule (critical):** never include a bracketed CI-skip marker such
+    as `[skip ci]` / `[ci skip]` / `skip-checks` in a commit message. On GitHub
+    Actions + Cloudflare Pages that marker skips the entire push's workflow **and**
+    the Cloudflare deployment, so a translation push (or any deploy) would silently
+    not run.
+
+5.  Pushing an English source file (e.g. `src/content/blog/en/my-post.md`) to `main`
+    triggers `i18n-translate`, which translates the change into every target locale,
+    self-checks the output, and commits it back to `main` (`PUBLISH_MODE: "commit"`).
+    Set `PUBLISH_MODE: "pr"` in the generated workflow to require a human merge
+    instead.
+
+> **Incremental & manual backfill:** existing translations are reused, so reruns only
+> fill gaps. To bootstrap an already-populated site, run the workflow manually
+> (`workflow_dispatch`) with `force` + a `scope` regex (e.g. `posts`).
+
 ### Read-only mode
 
 Flip the CMS to read-only during deploys, content migrations, or incident mitigation. Editors can still browse and search, but saving and publishing are disabled:
@@ -440,7 +504,7 @@ vp test
 vp pack
 ```
 
-`vp run build:templates` regenerates the deployable function templates (`templates/functions/auth.js` and `templates/edge-functions/auth.js`) from `src/functions`; `vp run build` runs it before packaging.
+`vp run build:templates` regenerates the deployable function templates (`templates/functions/auth.js` and `templates/edge-functions/auth.js`) from `src/functions`, and copies the i18n workflow templates from `templates/i18n/` into `dist/templates/i18n/`; `vp run build` runs it before packaging.
 
 Use `vp run format` to format code and `vp run format:check` to verify formatting. See [Code style](docs/code-style.md) for the formatter profile and unsupported rules.
 

@@ -10,6 +10,61 @@ section below.
 
 ---
 
+## 0.3.4
+
+### Added
+
+- Productized the i18n auto-translation workflow so consumers no longer copy files
+  by hand. The three artifacts (`.github/workflows/i18n-translate.yml`,
+  `i18n/glossary.md`, `scripts/remap-translations.sh`) are now shipped as templates
+  under `templates/i18n/` and copied into `dist/templates/i18n/` by
+  `vp run build:templates`, so they are included in the npm tarball.
+- Added the `init:i18n` CLI command (also `init --i18n`). It reads the consumer's
+  Sveltia CMS config (`sveltia-cms.config.mjs` by default; override with
+  `--config`), extracts `i18n.default_locale`, `i18n.locales` (both
+  `["en","fr"]` and `[{locale:"en"}]` forms) and each collection's `folder`,
+  auto-fills the template placeholders (`__CONTENT_ROOT__`, `__COLLECTION_EN_PATH__`,
+  `__TARGET_LANGS__`, `__CONFIG_FILE__`, `__SKIP_COLLECTIONS__`, `__I18N_STRUCTURE__`,
+  `__PROJECT_NAME__`), and writes the three files. Existing files are skipped unless
+  `--force` is passed, and the command prints the required `DEEPSEEK_API_KEY` secret
+  and the mandatory Sveltia CMS settings.
+- Worked around a `pelikhan/action-continuous-translation` compatibility bug in the
+  shipped workflow: the action silently drops any file whose path contains a
+  two-letter language directory (e.g. `/en/`) or a `.{lang}.` filename suffix, so
+  Sveltia's `multiple_folders` English sources were being filtered out ("No files or
+  not matching languages selected"). The workflow now stages English sources into a
+  flat `.i18n-staging/` directory (no `/xx/` segment) before translation, seeds
+  existing translations for incremental reuse, and remaps results back to the
+  `multiple_folders` layout via `remap-translations.sh`.
+- Documented the hard requirement that commit messages must never contain bracketed
+  CI-skip markers (`[skip ci]`, `[ci skip]`, etc.): on GitHub Actions + Cloudflare
+  Pages such a marker skips the entire push's workflow **and** the CF deployment.
+
+### Changed
+
+- `check:templates` now validates that each i18n template still carries its required
+  placeholders before the package is built.
+
+---
+
+## 0.3.3
+
+Maintenance release that bundled the i18n translation-workflow hardening that
+followed 0.3.2 and pinned the correct DeepSeek model alias:
+
+- Pinned `model_alias: "translation: openai:deepseek-v4-flash"` and documented the
+  `DEEPSEEK_API_KEY` secret and the DeepSeek OpenAI-compatible endpoint.
+- Change detection now skips draft entries (`draft: true`) and template files, and
+  preserves existing human-edited translations (only updating segments whose English
+  source changed).
+- Added a CMS-toggleable `autoTranslate` field and a `workflow_dispatch` `scope` input
+  for batched, incremental bootstrap of existing (pre-populated) sites.
+- Hardened the publish flow: `.genaiscript/cache` restore, failure alerting via
+  auto-created issues, single-source-of-truth locale validation, `authors` excluded
+  from translation, and `force-with-lease` push retries.
+
+---
+
 ## 0.3.2
 
 ### Added

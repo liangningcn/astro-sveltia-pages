@@ -23,3 +23,54 @@ describe("generated auth templates", () => {
         });
     }
 });
+
+// i18n workflow templates are shipped verbatim (placeholders filled by the
+// init:i18n CLI). These tests assert the required placeholders survive in the
+// source templates so the dist copy and the CLI substitution stay correct.
+const I18N_TEMPLATES_DIR = fileURLToPath(new URL("../templates/i18n", import.meta.url));
+
+const I18N_TEMPLATES = {
+    workflow: fileURLToPath(
+        new URL("../templates/i18n/i18n-translate.yml", import.meta.url),
+    ),
+    glossary: fileURLToPath(new URL("../templates/i18n/glossary.md", import.meta.url)),
+    remap: fileURLToPath(
+        new URL("../templates/i18n/remap-translations.sh", import.meta.url),
+    ),
+};
+
+describe("i18n workflow templates", () => {
+    it("all three i18n templates exist", () => {
+        expect(existsSync(I18N_TEMPLATES.workflow)).toBe(true);
+        expect(existsSync(I18N_TEMPLATES.glossary)).toBe(true);
+        expect(existsSync(I18N_TEMPLATES.remap)).toBe(true);
+        expect(existsSync(I18N_TEMPLATES_DIR)).toBe(true);
+    });
+
+    it("workflow template carries the substitution placeholders", () => {
+        const content = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
+
+        for (const token of [
+            "__CONTENT_ROOT__",
+            "__COLLECTION_EN_PATH__",
+            "__TARGET_LANGS__",
+            "__CONFIG_FILE__",
+            "__SKIP_COLLECTIONS__",
+            "__I18N_STRUCTURE__",
+        ]) {
+            expect(content).toContain(token);
+        }
+    });
+
+    it("glossary template carries the project-name placeholder", () => {
+        const content = readFileSync(I18N_TEMPLATES.glossary, "utf-8");
+        expect(content).toContain("__PROJECT_NAME__");
+    });
+
+    it("remap script takes positional args and carries no placeholder", () => {
+        const content = readFileSync(I18N_TEMPLATES.remap, "utf-8");
+        expect(content).toContain("${1:");
+        expect(content).toContain("${2:");
+        expect(content).not.toMatch(/__[A-Z0-9_]+__/);
+    });
+});

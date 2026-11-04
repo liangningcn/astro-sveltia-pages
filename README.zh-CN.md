@@ -21,6 +21,7 @@ Sveltia CMS 与 Astro 深度集成，**无需手写任何 CMS 配置**。专为 
 - [Content Loader](#content-loader)
 - [使用指南](#使用指南)
     - [多语言（i18n）](#多语言i18n)
+    - [自动翻译（i18n-translate）](#自动翻译i18n-translate)
     - [只读模式](#只读模式)
     - [单文件配置（singletons）](#单文件配置singletons)
     - [其他已提升的配置项](#其他已提升的配置项)
@@ -354,6 +355,56 @@ export const collections = {
 - 若 CMS 配置使用 `multiple_folders`，但你忘记传 `{ locale: "..." }`，loader 会显式抛出错误，防止加载错误数据。
 - 若某个集合在 CMS 配置中设置了 `i18n: false`，它会退出本地化，无论全局 i18n 设置如何都从根文件夹加载。
 
+### 自动翻译（i18n-translate）
+
+当 CMS 只维护英文源文件（见下方的 Sveltia 设置）后，即可让 CI 自动翻译其它所有语言。本包内置一套基于
+[`pelikhan/action-continuous-translation`](https://github.com/pelikhan/action-continuous-translation)（由 DeepSeek 驱动）的现成工作流，外加术语表与回写脚本；`init:i18n` 命令可一键接入，无需手工改路径。
+
+1.  在项目根目录运行：
+
+        ```bash
+        pnpm exec astro-sveltia-pages init:i18n
+        ```
+
+        它会自动探测 `sveltia-cms.config.mjs`（可用 `--config <path>` 覆盖），读取
+        `i18n.default_locale`、`i18n.locales` 与各集合的 `folder`，填充模板占位符，并写出三份文件：
+
+        - `.github/workflows/i18n-translate.yml`
+        - `i18n/glossary.md`
+        - `scripts/remap-translations.sh`
+
+        可用参数：
+
+        - `--content-root <path>` — 内容根目录（默认 `src/content`）
+        - `--default-locale <lang>` — 源语言（默认 `en`）
+        - `--project-name <name>` — 用于术语表标题
+        - `--collections <a,b,c>` — 仅接入指定集合
+        - `--skip-collections <a,b>` — 始终排除这些集合
+        - `--force` — 覆盖已存在的文件
+
+        已存在文件默认跳过（不覆盖），除非传入 `--force`。
+
+2.  在仓库添加 GitHub Secret（**Settings → Secrets and variables → Actions → New repository secret**）：
+
+    - `DEEPSEEK_API_KEY` — DeepSeek API Key（`sk-…` 开头），申请地址
+      <https://platform.deepseek.com>。工作流会调用 DeepSeek 的 OpenAI 兼容端点
+      `https://api.deepseek.com`，使用 `deepseek-v4-flash`。
+
+3.  在 Sveltia CMS 配置中，**每个需要自动翻译的集合都必须设置**：
+
+    ```js
+    i18n: { save_all_locales: false, initial_locales: ["en"] }
+    ```
+
+    这样 CMS 只会提交英文源文件，其余语言由 CI 生成。同时把不可翻译字段（`slug`、图片路径等）标记为
+    `i18n: duplicate`，并确保 backend **不要**设置 `skip_ci: true`。
+
+4.  ⚠️ **提交信息规则（重要）：** 提交信息里绝对不能出现方括号包裹的 CI 跳过标记，如 `[skip ci]` / `[ci skip]` / `skip-checks`。在 GitHub Actions + Cloudflare Pages 上，这类标记会让整次 push 的工作流 **和** Cloudflare 部署一起被跳过，导致翻译推送（或任何部署）静默不执行。
+
+5.  向 `main` 推送一个英文源文件（例如 `src/content/blog/en/my-post.md`）即会触发 `i18n-translate`：它会把变更翻译成全部目标语言，自检通过后提交回 `main`（`PUBLISH_MODE: "commit"`）。若想保留人工合并闸门，可在生成的工作流中把 `PUBLISH_MODE` 改为 `"pr"`。
+
+> **增量与存量回填：** 已存在的译文会被复用，重跑只填补空缺。若要为已填充的存量站点引导翻译，可手动运行工作流（`workflow_dispatch`），勾选 `force` 并填写 `scope` 正则（如 `posts`）。
+
 ### 只读模式
 
 在部署、内容迁移或故障处理期间将 CMS 切换为只读。编辑者仍可浏览和搜索，但保存与发布被禁用：
@@ -440,7 +491,7 @@ vp test
 vp pack
 ```
 
-`vp run build:templates` 从 `src/functions` 重新生成可部署的函数模板（`templates/functions/auth.js` 与 `templates/edge-functions/auth.js`）；`vp run build` 会在打包前执行它。
+`vp run build:templates` 从 `src/functions` 重新生成可部署的函数模板（`templates/functions/auth.js` 与 `templates/edge-functions/auth.js`），并把 i18n 工作流模板从 `templates/i18n/` 复制到 `dist/templates/i18n/`；`vp run build` 会在打包前执行它。
 
 使用 `vp run format` 格式化代码，使用 `vp run format:check` 校验格式。格式化器配置与不支持的规则见[代码风格](docs/code-style.md)。
 
