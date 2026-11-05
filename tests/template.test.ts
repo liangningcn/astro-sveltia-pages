@@ -51,6 +51,7 @@ describe("i18n workflow templates", () => {
         const content = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
 
         for (const token of [
+            "__TEMPLATE_VERSION__",
             "__CONTENT_ROOT__",
             "__COLLECTION_EN_PATH__",
             "__TARGET_LANGS__",
@@ -62,15 +63,104 @@ describe("i18n workflow templates", () => {
         }
     });
 
+    it("every i18n template carries the version marker placeholder", () => {
+        for (const path of Object.values(I18N_TEMPLATES)) {
+            expect(readFileSync(path, "utf-8")).toContain(
+                "astro-sveltia-pages i18n template v__TEMPLATE_VERSION__",
+            );
+        }
+    });
+
     it("glossary template carries the project-name placeholder", () => {
         const content = readFileSync(I18N_TEMPLATES.glossary, "utf-8");
         expect(content).toContain("__PROJECT_NAME__");
     });
 
-    it("remap script takes positional args and carries no placeholder", () => {
+    it("remap script takes positional args and uses mv, not git mv", () => {
         const content = readFileSync(I18N_TEMPLATES.remap, "utf-8");
         expect(content).toContain("${1:");
         expect(content).toContain("${2:");
-        expect(content).not.toMatch(/__[A-Z0-9_]+__/);
+        // Staging files are untracked: `git mv` fails with "not under version control".
+        expect(content).not.toContain("git mv");
+        expect(content).toContain("mv -f");
+        expect(content).toContain(".sources");
+        expect(content).toContain("TARGET_LANGS");
+    });
+});
+
+// 0.3.5 fixed a set of real CI failures in 0.3.4. Guard each one so a future
+// "cleanup" cannot silently reintroduce them.
+describe("i18n workflow 0.3.5 regression guards", () => {
+    const workflow = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
+
+    it("uses a NON-hidden staging dir (GenAIScript skips dot directories)", () => {
+        expect(workflow).toContain('STAGING_DIR: "i18n-staging"');
+        expect(workflow).not.toContain(".i18n-staging");
+    });
+
+    it("never passes a raw /en/ source path to pelikhan", () => {
+        expect(workflow).toContain("Stage EN sources (flatten locale dirs)");
+        expect(workflow).toContain("files: ${{ steps.stage.outputs.stage_files }}");
+    });
+
+    it("reclaims Docker root-owned files and does no host-side mkdir", () => {
+        expect(workflow).toContain("Reclaim ownership of Docker-generated files");
+        expect(workflow).toContain("sudo chown -R");
+        expect(workflow).not.toContain("mkdir -p .genaiscript");
+    });
+
+    it("fails loudly when no translations were produced", () => {
+        expect(workflow).toContain("Verify translations were produced");
+        expect(workflow).toContain("Fail when translation did not succeed");
+        expect(workflow).toContain("exit 1");
+    });
+
+    it("pins the upstream action and uses the current DeepSeek model", () => {
+        expect(workflow).toContain("pelikhan/action-continuous-translation@v0.2.11");
+        expect(workflow).toContain("openai:deepseek-flash");
+        expect(workflow).not.toContain("deepseek-v4-flash");
+        expect(workflow).toContain("filename_template:");
+        expect(workflow).toContain("translations_dir:");
+    });
+
+    it("caches pelikhan's real incremental cache directory", () => {
+        expect(workflow).toContain("path: i18n-translations");
+    });
+
+    it("keeps quoting on the `on` key for standard YAML parsers", () => {
+        expect(workflow).toContain('"on":');
+    });
+
+    it("does not pre-seed staging with existing translations", () => {
+        // pelikhan never reads target markdown; pre-seeded files would make the
+        // zero-translation gate pass on a run that produced nothing.
+        expect(workflow).not.toContain("CONTENT_ROOT/$coll/$L");
+        expect(workflow).toContain("translationsDir/<lang>.json");
+    });
+
+    it("lowercases language codes when verifying produced filenames", () => {
+        // pelikhan renders {{lang}} with to.toLowerCase(): zh-CN -> .zh-cn.md.
+        expect(workflow).toContain("tr '[:upper:]' '[:lower:]'");
+    });
+
+    it("remap restores the original Sveltia locale casing", () => {
+        const remap = readFileSync(I18N_TEMPLATES.remap, "utf-8");
+        expect(remap).toContain("canonical_lang");
+        expect(remap).toContain("tr '[:upper:]' '[:lower:]'");
+        expect(remap).toContain('dest_lang="$(canonical_lang "$lang")"');
+    });
+
+    it("self-reports the template version in every Actions run", () => {
+        expect(workflow).toContain("Report i18n template version");
+        expect(workflow).toContain("v__TEMPLATE_VERSION__");
+    });
+
+    it("uses the same pnpm upgrade command in all three generated files", () => {
+        for (const path of Object.values(I18N_TEMPLATES)) {
+            const content = readFileSync(path, "utf-8");
+
+            expect(content).toContain("pnpm exec astro-sveltia-pages init:i18n");
+            expect(content).not.toContain("npx ");
+        }
     });
 });

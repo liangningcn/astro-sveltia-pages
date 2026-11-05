@@ -35,6 +35,16 @@ Sveltia CMS 与 Astro 深度集成，**无需手写任何 CMS 配置**。专为 
 pnpm add astro-sveltia-pages
 ```
 
+> **⚠️ 升级必读（每次升级都要看）** —— 如果你启用了 i18n 自动翻译，**每次升级本包后，都必须在每一个站点仓库重跑
+> `pnpm exec astro-sveltia-pages init:i18n`**。`.github/workflows/i18n-translate.yml`、
+> `i18n/glossary.md`、`scripts/remap-translations.sh` 是提交进仓库的生成快照，`pnpm up` **不会**替换它们。
+> 只升级依赖却继续跑旧 workflow，会导致翻译静默失败，而且极难排查。
+>
+> - 立即修复：`pnpm exec astro-sveltia-pages init:i18n`（自动升级旧文件，并保留 `*.bak` 备份）
+> - CI 门禁：`pnpm exec astro-sveltia-pages init:i18n --check`
+> - 自 0.3.5 起，`astro dev` / `astro build` 检测到过期模板时会主动打印醒目警告；
+>   给集成传 `i18nTemplateCheck: "error"` 可改为直接让构建失败，传 `"off"` 则关闭。
+
 ## 快速开始
 
 在 `astro.config.mjs` 中注册集成：
@@ -381,14 +391,22 @@ export const collections = {
         - `--collections <a,b,c>` — 仅接入指定集合
         - `--skip-collections <a,b>` — 始终排除这些集合
         - `--force` — 覆盖已存在的文件
+        - `--check` — 只校验生成文件是否为最新版本（过期则非零退出，可用于 CI）
 
-        已存在文件默认跳过（不覆盖），除非传入 `--force`。
+        生成的文件都带版本标记。重跑 `init:i18n` 会**自动升级**过期的生成文件
+        （原文件备份为 `*.bak`）；供用户编辑的 `i18n/glossary.md` 不会自动覆盖。
+        `--force` 会强制覆盖全部文件。
+
+> ⚠️ **每次升级 `astro-sveltia-pages` 后都必须重跑 `init:i18n`。** 这三份文件是提交进你仓库的生成快照，
+> 只升级依赖**不会**更新它们，工作流会继续跑旧版（可能是有 bug 的）文件。自 0.3.5 起集成会在
+> `astro dev` / `astro build` 时主动告警；可在 CI 中加入
+> `pnpm exec astro-sveltia-pages init:i18n --check` 自动拦截过期模板（或设置 `i18nTemplateCheck: "error"`）。
 
 2.  在仓库添加 GitHub Secret（**Settings → Secrets and variables → Actions → New repository secret**）：
 
     - `DEEPSEEK_API_KEY` — DeepSeek API Key（`sk-…` 开头），申请地址
       <https://platform.deepseek.com>。工作流会调用 DeepSeek 的 OpenAI 兼容端点
-      `https://api.deepseek.com`，使用 `deepseek-v4-flash`。
+      `https://api.deepseek.com`，使用 `deepseek-flash`（旧名 `deepseek-v4-flash` 已退役）。
 
 3.  在 Sveltia CMS 配置中，**每个需要自动翻译的集合都必须设置**：
 
@@ -401,9 +419,9 @@ export const collections = {
 
 4.  ⚠️ **提交信息规则（重要）：** 提交信息里绝对不能出现方括号包裹的 CI 跳过标记，如 `[skip ci]` / `[ci skip]` / `skip-checks`。在 GitHub Actions + Cloudflare Pages 上，这类标记会让整次 push 的工作流 **和** Cloudflare 部署一起被跳过，导致翻译推送（或任何部署）静默不执行。
 
-5.  向 `main` 推送一个英文源文件（例如 `src/content/blog/en/my-post.md`）即会触发 `i18n-translate`：它会把变更翻译成全部目标语言，自检通过后提交回 `main`（`PUBLISH_MODE: "commit"`）。若想保留人工合并闸门，可在生成的工作流中把 `PUBLISH_MODE` 改为 `"pr"`。
+5.  向 `main` 推送一个英文源文件（例如 `src/content/blog/en/my-post.md`）即会触发 `i18n-translate`：它会把变更翻译成全部目标语言，自检通过后提交回 `main`（`PUBLISH_MODE: "commit"`）。若想保留人工合并闸门，可在生成的工作流中把 `PUBLISH_MODE` 改为 `"pr"`。英文源会立即上线，其余语言在同一次后续提交中一起发布。自 0.3.5 起，若一篇译文都没产出，工作流会**显式失败并自动建 issue**，不再出现"全绿但没翻译"。
 
-> **增量与存量回填：** 已存在的译文会被复用，重跑只填补空缺。若要为已填充的存量站点引导翻译，可手动运行工作流（`workflow_dispatch`），勾选 `force` 并填写 `scope` 正则（如 `posts`）。
+> **增量与存量回填：** 工作流通过 `actions/cache` 缓存 pelikhan 的逐语言翻译缓存（`i18n-translations/<lang>.json`），重跑只会重新翻译发生变化的节点。注意 pelikhan 是从英文源 + 该缓存**重新生成**译文文件，并**不读取**已存在的译文 Markdown，因此人工修改过的译文在下一次英文源变更时会被覆盖。若要为已填充的存量站点引导翻译，可手动运行工作流（`workflow_dispatch`），勾选 `force` 并填写 `scope` 正则（如 `posts`）。
 
 ### 只读模式
 

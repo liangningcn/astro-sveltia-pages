@@ -1,12 +1,18 @@
+# astro-sveltia-pages i18n template v__TEMPLATE_VERSION__
 # .github/workflows/i18n-translate.yml
 #
 # 来源: astro-sveltia-pages —— i18n 自动翻译工作流模板。
 # 由 `astro-sveltia-pages init:i18n` 生成，项目专有路径已自动填充。
 #
-# 方案: 复用 pelikhan/action-continuous-translation 作为翻译引擎（DeepSeek 驱动）。
+# ⚠️ 升级 astro-sveltia-pages 后必须重新运行 `pnpm exec astro-sveltia-pages init:i18n`
+#    （CLI 会自动检测旧版模板并升级，同时备份原文件）。只升级依赖不会更新本文件。
+#    继续用旧 workflow 会导致翻译静默失败，且极难排查 —— 排查前先核对下面
+#    "Report i18n template version" 步骤打印的版本是否与已安装包版本一致。
+#
+# 方案: 复用 pelikhan/action-continuous-translation@v0.2.11 作为翻译引擎（DeepSeek 驱动）。
 #
 # 目标: Sveltia CMS 编辑只维护英文源文件；本工作流在 EN 源变更时，
-#       增量翻译为目标语言，并“自检通过后直接发布到 main”（无需 CMS 二次操作）。
+#       增量翻译为目标语言，并"自检通过后直接发布到 main"（无需 CMS 二次操作）。
 #       通过 env.PUBLISH_MODE 可切换为开 PR 待人工合并。
 #
 # ⚠️ 已知坑（务必遵守，否则整次 push 的工作流 / CF 部署都会被跳过）：
@@ -18,10 +24,10 @@
 #      i18n:
 #        structure: __I18N_STRUCTURE__
 #        default_locale: en
-#      每个“需要 CI 翻译”的集合必须设：
+#      每个"需要 CI 翻译"的集合必须设：
 #        i18n: { save_all_locales: false, initial_locales: ["en"] }
 #      ← 让 CMS 只提交 en 文件，CI 负责其余语言（否则会一次生成一堆空壳译文）。
-#      把 slug / 图片路径等“不可翻译字段”标记为 `i18n: duplicate`，
+#      把 slug / 图片路径等"不可翻译字段"标记为 `i18n: duplicate`，
 #      它们会被原样复制、永不被送翻。
 # 2) 不触发翻译：单篇在 frontmatter 设 `autoTranslate: false`；
 #    全局暂停：把本文件 env.AUTO_TRANSLATE 改为 "false"。
@@ -35,16 +41,14 @@
 #     • DEEPSEEK_API_KEY —— DeepSeek API Key（sk- 开头）。
 #        申请：platform.deepseek.com → API Keys → Create new API key，复制后立即保存（只显示一次）。
 #        填到：本文件翻译步骤的 secrets.DEEPSEEK_API_KEY（端点 https://api.deepseek.com 已写死）。
-#   百度翻译（备用/降级，非 LLM、无法直接驱动 pelikhan）：
-#     • BAIDU_TRANSLATE_APP_ID / BAIDU_TRANSLATE_SECRET —— 百度翻译开放平台，需 MD5 签名，
-#       只能作为 DeepSeek 限流/失败时的降级通道，由独立脚本翻译纯文本（会丢失代码块/字段保护）。
+#     • 模型 deepseek-flash 为当前官方名；0.3.4 用的旧版 flash 别名已退役，不要再用。
 # ───────────────────────────────────────────────────────────────────
 
 name: i18n-translate
 
 # 引号包裹 `on` 以兼容标准 YAML 解析器（裸 `on:` 在 YAML 1.1 会被视为布尔值）。
 "on":
-    # 只监听“需要翻译的集合”的英文源文件（本模板由 init:i18n 填入对应集合）；
+    # 只监听"需要翻译的集合"的英文源文件（本模板由 init:i18n 填入对应集合）；
     # 译文文件不会再次触发，天然避免回环。
     push:
         branches: [main]
@@ -65,20 +69,16 @@ permissions:
     contents: write
     pull-requests: write
     issues: write # 翻译失败时由 alert 步骤自动建 issue
-    # 默认走 DeepSeek（OpenAI 兼容端点），不需要 models: read。
-    # 仅当回退到 GitHub Models 免费额度时才取消下一行注释。
-    # models: read
 
 # 串行执行：避免同一时间多篇文章发布导致多个工作流并发，互相踩 main。
 # cancel-in-progress:false → 后到的发布排队逐个完成（不互相取消、不丢进度、不错乱）。
-# 注意：同一工作流“运行内”的翻译分片（matrix）是并行的，以提升大站吞吐量。
 concurrency:
     group: i18n-translate
     cancel-in-progress: false
 
 env:
     # 发布方式开关：
-    #   commit（默认）→ 译文自检通过后直接提交 main，站点自动重建即“正式发布”，CMS 无需二次点击。
+    #   commit（默认）→ 译文自检通过后直接提交 main，站点自动重建即"正式发布"，CMS 无需二次点击。
     #   pr            → 改为开 PR 待人工合并（保留复核闸门）。
     PUBLISH_MODE: "commit"
     # 翻译总开关：false 时整体暂停（任何 EN 发布都不触发翻译），用于大批量迁移/临时冻结。
@@ -92,8 +92,15 @@ env:
     # 大站切片：单次翻译最多处理的文件数，超出自动拆成并行分片（避免 6h 超时 / 参数溢出）。
     CHUNK_SIZE: "20"
     # 语言单一来源校验：填 Sveltia 配置文件路径，工作流会校验其 locales 与 TARGET_LANGS 一致；
-    # 留空则跳过校验。配置才是“唯一事实来源”，改语言只改这里。
+    # 留空则跳过校验。配置才是"唯一事实来源"，改语言只改这里。
     CONFIG_FILE: "__CONFIG_FILE__"
+    # 暂存目录：必须是【非隐藏】目录且路径中不含两位语言码目录段。
+    # pelikhan/action-continuous-translation 会过滤含 /xx/ 语言目录的文件，
+    # 而 GenAIScript 的 glob 默认忽略以点开头的隐藏目录（0.3.4 的隐藏暂存目录因此失效）。
+    STAGING_DIR: "i18n-staging"
+    # translations_dir 只放 usage.jsonl 与 <lang>.json 增量缓存；
+    # 真正的译文由 filename_template 写到源文件同目录，故也落在 STAGING_DIR 内。
+    TRANSLATIONS_DIR: "i18n-translations"
 
 jobs:
     # ── 阶段 1：检测变更 + 过滤 + 切片（单 job，输出 JSON 分片列表）──
@@ -108,8 +115,16 @@ jobs:
               with:
                   fetch-depth: 0 # 需要 before/after 两个 SHA 做增量差异
 
+            # 让每次运行的日志都能一眼看出"跑的是哪个版本的模板"。
+            # 排查翻译失败时，先确认这里的版本与已安装的包版本一致；
+            # 不一致就说明升级包之后没有重跑 init:i18n。
+            - name: Report i18n template version
+              run: |
+                  echo "::notice::i18n 模板版本 v__TEMPLATE_VERSION__（由 init:i18n 生成）。"
+                  echo "::notice::升级 astro-sveltia-pages 后必须重跑 pnpm exec astro-sveltia-pages init:i18n，否则本文件仍是旧版。"
+
             # 语言单一来源校验：Sveltia 配置的 locales 必须与 TARGET_LANGS 完全一致，
-            # 否则直接失败并给出两边差异，防止“只改一边导致静默失效”。
+            # 否则直接失败并给出两边差异，防止"只改一边导致静默失效"。
             - name: Validate TARGET_LANGS against Sveltia config
               if: env.CONFIG_FILE != ''
               run: |
@@ -119,15 +134,17 @@ jobs:
                   if (!p || !fs.existsSync(p)) { console.log('CONFIG_FILE 未设置/不存在，跳过校验'); process.exit(0); }
                   const s = fs.readFileSync(p, 'utf8');
                   const dl = s.match(/default_locale:\s*['"](\w+)['"]/);
-                  // 兼容 locales: ["en", "fr"] 与 locales: [{ locale: "en", label: "..." }] 两种写法
-                  const localeKeys = [...s.matchAll(/locale:\s*['"](\w+)['"]/g)].map(m => m[1]);
+                  // 兼容 locales: ["en", "fr"] 与 locales: [{ locale: "en", label: "..." }] 两种写法。
+                  // (?:^|[{,\s]) 防止 /locale:/ 误匹配 default_locale 的尾部；
+                  // (?<![\w]) 防止误匹配集合里的 initial_locales，同时允许单行内联配置。
+                  const localeKeys = [...s.matchAll(/(?:^|[{,\s])locale:\s*['"]([\w-]+)['"]/g)].map(m => m[1]);
                   let locs = localeKeys;
                   if (locs.length === 0) {
-                    const block = s.match(/locales:\s*\[([^\]]*)\]/);
-                    if (block) locs = [...block[1].matchAll(/['"](\w+)['"]/g)].map(m => m[1]);
+                    const block = s.match(/(?<![\w])locales:\s*\[([^\]]*)\]/);
+                    if (block) locs = [...block[1].matchAll(/['"]([\w-]+)['"]/g)].map(m => m[1]);
                   }
                   if (!dl || !locs.length) { console.log('未在配置中找到 locales，跳过校验'); process.exit(0); }
-                  const target = locs.filter(l => l !== dl[1]).sort();
+                  const target = [...new Set(locs.filter(l => l !== dl[1]))].sort();
                   const want = (process.env.TARGET_LANGS || '').split(',').map(x => x.trim()).filter(Boolean).sort();
                   const a = JSON.stringify(target), b = JSON.stringify(want);
                   if (a !== b) {
@@ -145,7 +162,6 @@ jobs:
               env:
                   AUTO_TRANSLATE: ${{ env.AUTO_TRANSLATE }}
                   CONTENT_ROOT: ${{ env.CONTENT_ROOT }}
-                  TARGET_LANGS: ${{ env.TARGET_LANGS }}
                   SKIP_COLLECTIONS: ${{ env.SKIP_COLLECTIONS }}
                   CHUNK_SIZE: ${{ env.CHUNK_SIZE }}
                   FORCE: ${{ github.event.inputs.force }}
@@ -190,7 +206,7 @@ jobs:
                     if (base === '_template.md' || base === 'template.md') s = true;
                     if (/\/(templates|_templates)\//.test(f)) s = true;
                     if (skip.some(rx => rx.test(f))) s = true;
-                    if (!s) {
+                    if (!s && fs.existsSync(f)) {
                       const h = sh(`head -n 40 "${f}"`);
                       if (/^draft:\s*true\s*$/m.test(h)) s = true;          // 草稿不翻
                       if (/^autoTranslate:\s*false\s*$/m.test(h)) s = true; // 单篇开关
@@ -218,7 +234,6 @@ jobs:
         runs-on: ubuntu-latest
         strategy:
             matrix:
-                # chunks 为 [{i, files}] 数组，每个元素是一个分片
                 include: ${{ fromJSON(needs.detect.outputs.chunks) }}
             fail-fast: false # 一个分片失败不影响其余分片（失败由 alert 步骤汇总）
         steps:
@@ -226,88 +241,156 @@ jobs:
               with:
                   fetch-depth: 0
 
-            # (优化1) 恢复翻译缓存：pelikhan 增量依赖仓库已有译文，缓存进一步加速/省 token
+            # (修复 0.3.5) 缓存 pelikhan 真正的增量缓存目录 translations/<lang>.json，
+            # 而不是旧模板里那个 root 拥有、且根本没被使用的 .genaiscript/cache。
             - name: Restore translation cache
               uses: actions/cache@v4
               with:
-                  path: .genaiscript/cache
+                  path: i18n-translations
                   key: i18n-${{ runner.os }}-${{ github.run_id }}-${{ matrix.i }}
                   restore-keys: |
                       i18n-${{ runner.os }}-
 
-            # 暂存英文源到“无语言目录”的扁平路径后再翻译。
-            # 原因(pelikhan 兼容性 bug 修复)：pelikhan/action-continuous-translation 会过滤掉
-            # 路径中含 2 字母语言目录（如 /en/）或文件名带 .{lang}. 后缀的文件——而 Sveltia
-            # multiple_folders 的英文源恰好在 .../en/ 下，会被它当成“已有译文”而丢弃，
-            # 导致 "No files or not matching languages selected"。把源文件暂存到不含 /xx/ 的
-            # 扁平路径即可绕过该过滤；同时把已有译文一并拷入，保留人工润色与增量能力。
+            # 暂存英文源到"无语言目录、且非隐藏"的扁平路径后再翻译。
+            # 原因(pelikhan 兼容性 bug)：pelikhan@v0.2.11 的 translator.genai.mts 里有
+            #   .filter(({filename}) => !/\.[a-z]{2,2}(-[a-zA-Z]{2,3})?\.mdx?$/.test(filename))
+            #   .filter(({filename}) => !/\/[a-z]{2,2}(-[a-zA-Z]{2,3})?\//.test(filename))
+            # 会丢弃路径含 /en/ 或文件名带 .{lang}. 后缀的文件；而 Sveltia multiple_folders
+            # 的英文源恰在 .../en/ 下 → "No files or not matching languages selected."。
+            # 另外 GenAIScript 的 env.files glob 默认忽略以点开头的隐藏目录，
+            # 0.3.4 使用的隐藏暂存目录因此依然取不到文件，0.3.5 改为 i18n-staging。
+            #
+            # ⚠️ 不要预先把已有译文拷进暂存目录。pelikhan@v0.2.11 从不读取目标译文
+            #    Markdown，它的增量完全依赖 translationsDir/<lang>.json 缓存（由上面的
+            #    actions/cache 恢复）。预拷旧文件会让下面的"译文完整性"校验把旧文件
+            #    误判成本次产出，重新制造"全绿但没翻译"的静默失败。
             - name: Stage EN sources (flatten locale dirs)
               id: stage
               env:
                   CHUNK_FILES: ${{ matrix.files }}
                   CONTENT_ROOT: ${{ env.CONTENT_ROOT }}
-                  TARGET_LANGS: ${{ env.TARGET_LANGS }}
-                  DEFAULT_LOCALE: "en"
+                  STAGING_DIR: ${{ env.STAGING_DIR }}
               run: |
                   set -euo pipefail
-                  STAGE=.i18n-staging
+                  STAGE="$STAGING_DIR"
                   rm -rf "$STAGE"
                   STAGE_FILES=""
                   for f in $(echo "$CHUNK_FILES" | tr ';' '\n'); do
                     [ -z "$f" ] && continue
+                    [ -f "$f" ] || { echo "::error::源文件不存在: $f"; exit 1; }
                     rel="${f#"$CONTENT_ROOT"/}"              # {collection}/en/{slug}.md
                     coll="$(dirname "$(dirname "$rel")")"    # {collection}
                     slug="$(basename "${f%.md}")"            # {slug}
                     mkdir -p "$STAGE/$coll"
                     cp "$f" "$STAGE/$coll/$slug.md"
-                    for L in $(echo "$TARGET_LANGS" | tr ',' ' '); do
-                      if [ -f "$CONTENT_ROOT/$coll/$L/$slug.md" ]; then
-                        cp "$CONTENT_ROOT/$coll/$L/$slug.md" "$STAGE/$coll/$slug.$L.md"
-                      fi
-                    done
                     STAGE_FILES="${STAGE_FILES:+$STAGE_FILES;}$STAGE/$coll/$slug.md"
                   done
+                  [ -n "$STAGE_FILES" ] || { echo "::error::暂存失败，没有可翻译的源文件"; exit 1; }
                   echo "stage_files=$STAGE_FILES" >> "$GITHUB_OUTPUT"
-                  echo "暂存 $STAGE_FILES"
+                  # 记录源文件清单，供后续"译文完整性"校验与 remap 使用。
+                  echo "$STAGE_FILES" | tr ';' '\n' > "$STAGE/.sources"
+                  # 自检：任何暂存路径都不得含两位语言码目录段或 .{lang}. 文件名后缀，
+                  # 否则 pelikhan 会静默过滤，必须在进入翻译前就暴露。
+                  BAD=$(echo "$STAGE_FILES" | tr ';' '\n' | grep -E '/[a-z]{2}(-[a-zA-Z]{2,3})?/|\.[a-z]{2}(-[a-zA-Z]{2,3})?\.mdx?$' || true)
+                  if [ -n "$BAD" ]; then
+                    echo "::error::以下暂存路径会被 pelikhan 过滤，请检查集合名/slug: $BAD"
+                    exit 1
+                  fi
+                  echo "暂存完成: $STAGE_FILES"
 
-            # 翻译：复用现成 Action（remark AST 解析，代码块/链接天然保留）
-            # 主用 DeepSeek（OpenAI 兼容端点）：廉价、128K 上下文、非思维模式，专为翻译/批量而生。
+            # 翻译：复用现成 Action（remark AST 解析，代码块/链接天然保留）。
+            # 固定到 v0.2.11，避免浮动 @v0 随上游变更引入回归。
             - name: Translate chunk ${{ matrix.i }}
-              uses: pelikhan/action-continuous-translation@v0
+              uses: pelikhan/action-continuous-translation@v0.2.11
               with:
                   source: en
-                  lang: ${{ env.TARGET_LANGS }} # 一次输出全部目标语言
-                  files: ${{ steps.stage.outputs.stage_files }} # 扁平暂存路径，绕过 pelikhan 的 /xx/ 过滤
+                  lang: ${{ env.TARGET_LANGS }}
+                  files: ${{ steps.stage.outputs.stage_files }}
+                  # 显式固定译文命名，避免上游默认值变化导致 remap 找不到文件。
+                  # 默认 {{dirname}}/{{basename}}.{{lang}}{{extname}} → 与源文件同目录。
+                  filename_template: "{{dirname}}/{{basename}}.{{lang}}{{extname}}"
+                  translations_dir: ${{ env.TRANSLATIONS_DIR }}
                   openai_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
                   openai_api_base: https://api.deepseek.com
-                  # deepseek-v4-flash（非思维模式，最便宜、低延迟、128K 上下文）。
-                  # GenAIScript 模型 id 格式为 provider:model；openai_api_base 已指向 DeepSeek，故写 openai:deepseek-v4-flash。
-                  model_alias: "translation: openai:deepseek-v4-flash"
+                  # deepseek-flash 为当前官方模型名（0.3.4 的旧版 flash 别名已退役）。
+                  # GenAIScript 模型 id 格式为 provider:model。
+                  model_alias: "translation: openai:deepseek-flash"
                   instructions: |
                       仅翻译正文与可翻译字段；
                       严禁翻译：slug、图片/媒体路径、以 http(s):// 开头的外链、代码块与行内代码。
-                      保留人工译文：目标语言文件中若已有人工修正的译文，只更新“英文源发生变动”的段落，
-                      未变动段落必须原样保留，绝不允许整体覆盖重写已有译文。
-                  glossary_file: i18n/glossary.md # 品牌名/术语白名单（保持不变）
-                  # 限流/分片调优（按需打开，缓解 DeepSeek 速率限制）：
-                  # max_translation_tokens: 8000   # 单篇超长时分片，单次调用 token 上限
-                  # max_validation_tokens: 4000    # 质量自检分片上限
+                      严格保留源文档的 Markdown 结构、frontmatter 字段名与 HTML/组件标签，
+                      不得改写链接目标、不得增删列表项或重新排版。
+                      必须输出完整译文，不得输出摘要、省略或占位文本。
+                  glossary_file: i18n/glossary.md
+
+            # (修复 0.3.5) Docker action 以 root 写文件，宿主机 runner（非 root）后续读/写会
+            # 触发 "Permission denied"（0.3.4 日志里 mkdir .genaiscript/cache 直接让 job 失败）。
+            # 这里把生成物归属权收回，且永不因 chown 失败而中断。
+            - name: Reclaim ownership of Docker-generated files
+              if: always()
+              run: |
+                  # 分开执行：任一路径不存在时不能让整条 chown 中断（否则其余目录仍是 root 所有）。
+                  for d in "$STAGING_DIR" "$TRANSLATIONS_DIR" .genaiscript; do
+                    [ -e "$d" ] && sudo chown -R "$(id -u):$(id -g)" "$d" 2>/dev/null || true
+                  done
+
+            # (修复 0.3.5) 显式失败闸门：pelikhan 的 "genaiscript: cancelled" 退出码为 0，
+            # 0.3.4 会出现"workflow 全绿、但一篇译文都没有"的静默失败。
+            - name: Verify translations were produced
+              id: verify
+              env:
+                  TARGET_LANGS: ${{ env.TARGET_LANGS }}
+                  STAGING_DIR: ${{ env.STAGING_DIR }}
+              run: |
+                  set -euo pipefail
+                  STAGE="$STAGING_DIR"
+                  [ -f "$STAGE/.sources" ] || { echo "::error::缺少源文件清单 $STAGE/.sources"; exit 1; }
+                  MISSING=""
+                  TOTAL=0
+                  while IFS= read -r src; do
+                    [ -z "$src" ] && continue
+                    base="${src%.md}"
+                    for L in $(echo "$TARGET_LANGS" | tr ',' ' '); do
+                      TOTAL=$((TOTAL + 1))
+                      # pelikhan 用 lang: to.toLowerCase() 渲染 filename_template，
+                      # 因此 zh-CN 的译文文件名是 {slug}.zh-cn.md（全小写）。
+                      LL="$(echo "$L" | tr '[:upper:]' '[:lower:]')"
+                      [ -s "$base.$LL.md" ] || MISSING="$MISSING $src→$L"
+                    done
+                  done < "$STAGE/.sources"
+                  if [ "$TOTAL" -eq 0 ]; then
+                    echo "::error::源文件清单为空，翻译任务未执行。"
+                    exit 1
+                  fi
+                  if [ -n "$MISSING" ]; then
+                    echo "::error::译文缺失 $(echo "$MISSING" | wc -w) 项，翻译引擎未产出完整结果。"
+                    echo "缺失清单:$MISSING"
+                    echo "暂存目录实际内容："
+                    find "$STAGE" -type f -printf '  %p (%s bytes)\n' | head -80 || true
+                    echo "排查顺序：1) DEEPSEEK_API_KEY 是否有效/余额充足 2) 模型名 3) Actions 日志里是否有 'No files or not matching languages selected.' 4) pelikhan 是否因 markdown 校验失败或内容无变化而跳过写文件"
+                    exit 1
+                  fi
+                  echo "✅ 译文完整：$TOTAL 个 (文件 × 语言) 全部产出。"
+                  echo "produced=$TOTAL" >> "$GITHUB_OUTPUT"
 
             # 路径适配：把暂存译文移回 Sveltia 的 multiple_folders 布局
-            # content/{collection}/{lang}/{slug}.md
+            # {content_root}/{collection}/{lang}/{slug}.md
             - name: Remap to Sveltia layout
-              run: bash scripts/remap-translations.sh "$CONTENT_ROOT" ".i18n-staging"
+              run: bash scripts/remap-translations.sh "$CONTENT_ROOT" "$STAGING_DIR"
 
-            # (优化6) 自检 + 提交到共享 batch 分支（带 --force-with-lease 与重试，防并发/手推冲突）
+            # 自检 + 提交到共享 batch 分支（带 --force-with-lease 与重试，防并发/手推冲突）
             - name: Self-check & commit to batch branch
               run: |
-                  set -uo pipefail
+                  set -euo pipefail
                   BR="i18n/batch-${{ github.run_id }}"
                   git add -A "$CONTENT_ROOT"
-                  # 自检：本分片暂存的“非英文”译文若有空文件 → 视为不完整，终止（不写脏数据）
-                  EMPTY=$(git diff --cached --name-only "$CONTENT_ROOT" 2>/dev/null | grep -v '/en/' | while IFS= read -r f; do [ -f "$f" ] && [ ! -s "$f" ] && echo "$f"; done || true)
-                  if [ -n "$EMPTY" ]; then echo "存在空译文，终止发布："; echo "$EMPTY"; rm -rf .i18n-staging translations; exit 1; fi
-                  if [ -z "$(git diff --cached --name-only "$CONTENT_ROOT")" ]; then echo "本分片无译文变动，跳过提交"; rm -rf .i18n-staging translations; exit 0; fi
+                  # 自检：本次落盘的译文若有空文件 → 视为不完整，终止（不写脏数据）
+                  EMPTY=$(git diff --cached --name-only "$CONTENT_ROOT" | grep -v '/en/' | while IFS= read -r f; do [ -f "$f" ] && [ ! -s "$f" ] && echo "$f"; done || true)
+                  if [ -n "$EMPTY" ]; then echo "::error::存在空译文，终止发布："; echo "$EMPTY"; exit 1; fi
+                  if [ -z "$(git diff --cached --name-only "$CONTENT_ROOT")" ]; then
+                    echo "⚠️ 译文与已有内容一致（无变更），跳过提交。"
+                    exit 0
+                  fi
                   git config user.name "i18n-bot"
                   git config user.email "i18n-bot@users.noreply.github.com"
                   git fetch origin "$BR" || true
@@ -319,18 +402,22 @@ jobs:
                     if git rebase "origin/$BR" >/dev/null 2>&1 && git push --force-with-lease origin "$BR"; then ok=1; break; fi
                     sleep 4
                   done
-                  rm -rf .i18n-staging translations
-                  if [ "$ok" -ne 1 ]; then echo "推送 batch 分支失败"; exit 1; fi
+                  if [ "$ok" -ne 1 ]; then echo "::error::推送 batch 分支失败"; exit 1; fi
+
+            # (修复 0.3.5) 清理由 root 创建的临时目录；用 sudo 兜底，且不再执行
+            # 会触发 Permission denied 的 mkdir。
+            - name: Clean staging artifacts
+              if: always()
+              run: |
+                  sudo rm -rf "$STAGING_DIR" .genaiscript 2>/dev/null || rm -rf "$STAGING_DIR" .genaiscript 2>/dev/null || true
 
             # 调试日志（每分片留存，便于排查未完成的 (locale, file)）
-            - name: Upload translation logs
-              if: always()
-              run: mkdir -p .genaiscript/cache
             - uses: actions/upload-artifact@v4
               if: always()
               with:
                   name: translation-logs-${{ github.run_id }}-${{ matrix.i }}
-                  path: .genaiscript/cache/
+                  path: ${{ env.TRANSLATIONS_DIR }}/
+                  if-no-files-found: ignore
 
     # ── 阶段 3：汇总分片 → 发布（commit 直发 main / pr 待合并）+ 失败告警 ──
     publish:
@@ -354,9 +441,19 @@ jobs:
                     git checkout -b "$BR" "origin/$BR"
                     echo "merged=true" >> "$GITHUB_OUTPUT"
                   else
-                    echo "无译文产出（batch 分支不存在）"
                     echo "merged=false" >> "$GITHUB_OUTPUT"
                   fi
+
+            # (修复 0.3.5) translate 未成功时必须显式失败，否则 publish 会打印
+            # "无译文产出"然后整条流水线显示绿色。零译文/零映射已由 translate 内的
+            # Verify 与 remap 步骤 exit 1 捕获；translate 成功但 merged=false 属于
+            # "译文与已有内容一致、无需提交"的合法增量场景，不能误报失败。
+            - name: Fail when translation did not succeed
+              if: needs.translate.result != 'success'
+              run: |
+                  echo "::error::翻译分片未成功完成（translate result: ${{ needs.translate.result }}），没有译文被发布。"
+                  echo "请打开 translate 分片的日志，重点看 Verify translations were produced 与 Remap 步骤。"
+                  exit 1
 
             # 发布方式：commit（默认）直接合并到 main 并推送
             - name: Publish to main (commit mode)
@@ -374,7 +471,7 @@ jobs:
                     sleep 4
                   done
                   git push origin --delete "$BR" || true
-                  if [ "$ok" -ne 1 ]; then echo "推送 main 失败"; exit 1; fi
+                  if [ "$ok" -ne 1 ]; then echo "::error::推送 main 失败"; exit 1; fi
 
             # 发布方式：pr 开 PR 待人工合并（保留复核闸门）
             - name: Open translation PR (pr mode)
@@ -391,14 +488,25 @@ jobs:
                       自检已通过，请人工复核机翻质量后合并以正式发布。
                   labels: i18n,automated
 
-            # (优化2) 失败告警：翻译或发布任一步骤失败 → 自动建 issue，避免“静默失败没人知道”
+            # 失败告警：翻译或发布任一步骤失败 → 自动建 issue，避免"静默失败没人知道"
             - name: Alert on failure (create issue)
               if: failure() || needs.translate.result == 'failure'
               uses: actions/github-script@v7
               with:
                   script: |
-                      const title = `i18n-translate failed: run ${context.runId}`;
-                      const body = `翻译工作流执行失败。\n\n运行链接: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n请检查翻译 API 凭证 (DEEPSEEK_API_KEY)、限流或译文自检。`;
+                      const result = '${{ needs.translate.result }}';
+                      const title = 'i18n-translate failed: run ' + context.runId;
+                      const body = [
+                        '翻译工作流执行失败（translate: ' + result + '）。',
+                        '',
+                        '运行链接: ' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId,
+                        '',
+                        '排查顺序：',
+                        '1. translate 分片日志里的 Verify translations were produced（缺失清单会列出 文件→语言）；',
+                        '2. DEEPSEEK_API_KEY 是否有效、余额是否充足；',
+                        '3. 是否出现 No files or not matching languages selected.（源文件路径/暂存目录问题）；',
+                        '4. 若从旧版升级，确认已重新运行 pnpm exec astro-sveltia-pages init:i18n 更新工作流。'
+                      ].join('\n');
                       await github.rest.issues.create({
                         owner: context.repo.owner,
                         repo: context.repo.repo,

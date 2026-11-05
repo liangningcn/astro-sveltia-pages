@@ -1,3 +1,7 @@
+<!-- astro-sveltia-pages i18n template v__TEMPLATE_VERSION__ -->
+<!-- ⚠️ 升级 astro-sveltia-pages 后必须重跑 `pnpm exec astro-sveltia-pages init:i18n`； -->
+<!--    只升级依赖不会更新本文件。术语表内容会被保留，不会被覆盖。 -->
+
 # Translation Glossary
 
 术语表：下列词在**所有目标语言**中保持原样、不被翻译（机翻容易误译品牌名/产品名/代码标识符）。

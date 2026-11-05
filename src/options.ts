@@ -127,6 +127,13 @@ export type SveltiaPagesOptions = {
      * favicon. Maps to the Sveltia `logo_url` config key.
      */
     logoUrl?: string;
+    /**
+     * Build-time check for the committed `init:i18n` snapshots.
+     * `warn` (default) prints a prominent upgrade notice during
+     * `astro dev` / `astro build`; `error` fails the build; `off` disables it.
+     * The check stays silent when none of the three files exist.
+     */
+    i18nTemplateCheck?: "warn" | "error" | "off";
 };
 
 function fail(message: string): never {
@@ -277,6 +284,15 @@ export function validateOptions(options: SveltiaPagesOptions): void {
         fail(
             `"platform" must be "cloudflare" or "edgeone" (got ${JSON.stringify(options.platform)}).`,
         );
+    }
+
+    if (
+        options.i18nTemplateCheck !== undefined &&
+        options.i18nTemplateCheck !== "warn" &&
+        options.i18nTemplateCheck !== "error" &&
+        options.i18nTemplateCheck !== "off"
+    ) {
+        fail('"i18nTemplateCheck" must be "warn", "error" or "off".');
     }
 }
 

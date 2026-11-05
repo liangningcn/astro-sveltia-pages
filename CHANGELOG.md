@@ -10,6 +10,110 @@ section below.
 
 ---
 
+## 0.3.5
+
+Critical fix release for the shipped i18n translation workflow. 0.3.4 shipped a
+workaround for the upstream file filter but it was never validated in a real CI
+run; several defects meant that even a freshly generated workflow could produce
+zero translations.
+
+### Fixed
+
+- **Hidden staging directory.** The staging directory used by the workflow was
+  `.i18n-staging` (dot-prefixed). GenAIScript's file glob ignores dot directories,
+  so `pelikhan/action-continuous-translation` received no files and aborted with
+  `No files or not matching languages selected.` The generated workflow now uses
+  a plain `i18n-staging/` directory, plus a pre-flight check that rejects any
+  staged path containing a two-letter locale segment or a `.{lang}.md` suffix.
+- **Docker root ownership.** The translation action runs as root and creates
+  `.genaiscript/`; the following `mkdir -p .genaiscript/cache` step failed with
+  `mkdir: Permission denied`, failing the whole translate job. Ownership of all
+  generated directories is now reclaimed with `sudo chown` and cleanup uses a
+  `sudo` fallback. No host-side `mkdir` remains.
+- **Silent green runs.** `genaiscript: cancelled` exits 0, so a run with zero
+  translations previously finished successfully. A `Verify translations were
+produced` step now asserts that every (source file × target language) output
+  exists and is non-empty, and a `Fail when no translations were published` gate
+  fails the publish job. Failures still open an issue, now with an actionable
+  checklist.
+- **`remap-translations.sh` used `git mv` on untracked staging files**, which
+  fails with `not under version control`. It now uses plain `mv` (the workflow's
+  `git add -A` picks the files up), excludes English sources via a `.sources`
+  manifest, validates languages against `TARGET_LANGS` instead of a loose regex,
+  and fails when nothing was mapped.
+- **Wrong translation cache path.** The cache restored `.genaiscript/cache`,
+  while pelikhan writes its incremental caches to `<translations_dir>/<lang>.json`.
+  The workflow now sets `translations_dir: i18n-translations` explicitly and
+  caches that directory.
+- **Unpinned upstream action / retired model.** `pelikhan/...@v0` is now pinned
+  to `@v0.2.11`; `filename_template` is set explicitly so remap cannot drift.
+  The model id is now `deepseek-flash` (`deepseek-v4-flash` has been retired by
+  DeepSeek).
+- **`init:i18n` locale parsing.** The object-form regex `/locale:/` also matched
+  the tail of `default_locale: "en"`, so an array-form `locales: ["en","fr"]`
+  resolved to just `["en"]` and the command aborted with "no target languages".
+  Both the CLI and the workflow validator now require a token boundary and match
+  only the standalone `locales:` key.
+- **The generated workflow's detect step** read frontmatter of deleted files
+  without checking existence, which could crash `sh()` on a removal-only push.
+  It now guards with `fs.existsSync`.
+- **Pre-seeded staging files defeated the failure gate.** The staging step copied
+  existing translations into the staging directory. pelikhan never reads target
+  markdown (its incremental state lives in `translations_dir/<lang>.json`), so
+  those copies made `Verify translations were produced` pass even on a run that
+  produced nothing — reintroducing the silent green run. Staging now contains only
+  English sources.
+- **Locale codes with uppercase region segments.** pelikhan renders `{{lang}}`
+  with `to.toLowerCase()`, so `zh-CN` produces `{slug}.zh-cn.md`. Verification and
+  `remap-translations.sh` compared against the raw `TARGET_LANGS` string and could
+  not find those files. Both now normalize case for matching, and remap maps the
+  lowercased code back to the exact locale string from the Sveltia config when
+  writing into `multiple_folders` directories.
+
+### Added
+
+- **Generated-file version stamping and upgrade detection.** All three generated
+  files carry an `astro-sveltia-pages i18n template vX.Y.Z` marker. Re-running
+  `init:i18n` now automatically upgrades outdated generated files (backing the
+  previous copy up as `*.bak`) instead of silently skipping them; the
+  user-editable `i18n/glossary.md` is never auto-overwritten. This fixes the
+  root cause of "I upgraded the package but translation is still broken": the
+  generated workflow in the consumer repo is a committed snapshot and a
+  dependency bump never updates it.
+- **`init:i18n --check`** — a CI-friendly guard that exits non-zero when any
+  generated file is missing or older than the current package.
+- `check:templates` now asserts the presence of every 0.3.5 workflow fix and
+  rejects known-broken 0.3.4 constructs (hidden staging dir, retired model id,
+  host-side `.genaiscript` mkdir).
+- **Build-time upgrade warning.** `astro dev` / `astro build` now compare the
+  installed package version with the stamps on the three committed i18n files
+  and print a prominent upgrade notice when they are stale. This is exactly
+  what a user runs right after `pnpm up`, so the notice reaches people who never
+  open the README. New option `i18nTemplateCheck: "warn" | "error" | "off"`
+  (default `warn`); `"error"` fails the build and doubles as a CI gate. The
+  check stays silent when i18n was never initialised.
+- **Self-reporting workflow.** Every run logs the template version it was
+  generated from (`Report i18n template version`), so a stale workflow is
+  obvious in the Actions log. `init:i18n --check` now renders the same canonical
+  notice with the exact fix command instead of a generic error.
+- **pnpm-first commands.** All user-facing examples, generated file headers and
+  CLI output use `pnpm exec astro-sveltia-pages ...`.
+
+### Migration (from 0.3.4)
+
+- **Re-run `pnpm exec astro-sveltia-pages init:i18n` in every consumer repository.**
+  This is mandatory: upgrading the dependency alone does not replace the
+  committed `.github/workflows/i18n-translate.yml`, `i18n/glossary.md` or
+  `scripts/remap-translations.sh`. The command detects the old files, upgrades
+  them and leaves `*.bak` backups for review (delete them or add to
+  `.gitignore`).
+- Optionally add `pnpm exec astro-sveltia-pages init:i18n --check` to CI so a future
+  dependency upgrade cannot leave stale templates unnoticed.
+- No CMS config changes are required. Commit messages must still avoid
+  bracketed CI-skip markers (`[skip ci]` etc.).
+
+---
+
 ## 0.3.4
 
 ### Added

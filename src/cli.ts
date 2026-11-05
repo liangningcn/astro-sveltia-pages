@@ -9,7 +9,21 @@ import {
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+    I18N_CHECK_COMMAND,
+    I18N_TEMPLATE_MARKER,
+    I18N_TEMPLATE_VERSION,
+    I18N_UPGRADE_COMMAND,
+    I18N_UPGRADE_NOTICE,
+    compareVersions,
+    formatI18nUpgradeNotice,
+    inspectI18nTemplates,
+    readI18nTemplateVersion,
+} from "./i18n-template-check.js";
 import { LOG_PREFIX } from "./options.js";
+
+// Keep the public surface stable: tests and consumers import these from the CLI.
+export { I18N_GENERATED_FILES, I18N_TEMPLATE_VERSION } from "./i18n-template-check.js";
 
 /** Deployment platforms the OAuth proxy can be deployed to. */
 export type InitPlatform = "cloudflare" | "edgeone";
@@ -241,6 +255,23 @@ export function runInit(args: string[], cwd: string = process.cwd()): void {
 // Reads the consumer's Sveltia CMS config, fills the i18n workflow templates'
 // placeholders and writes the three files into the project.
 
+/**
+ * CI-friendly guard: reports generated files that are missing or older than the
+ * installed package. Exits non-zero with the canonical upgrade notice so a
+ * dependency upgrade cannot silently leave a broken workflow in the repo.
+ */
+export function checkI18nTemplates(cwd: string = process.cwd()): void {
+    const status = inspectI18nTemplates(cwd);
+
+    if (status.outdated) {
+        fail(
+            `i18n 模板不是最新版本（需要 ${I18N_TEMPLATE_VERSION}）。\n${formatI18nUpgradeNotice(status)}`,
+        );
+    }
+
+    console.log(`${LOG_PREFIX} ✅ i18n 模板均为最新版本 ${I18N_TEMPLATE_VERSION}。`);
+}
+
 /** Resolves an i18n template from `dist/templates/i18n/` (published) or `../templates/i18n/` (source). */
 function resolveI18nTemplatePath(name: string): string {
     return resolveTemplatePath(join("templates", "i18n", name));
@@ -253,17 +284,24 @@ function extractDefaultLocale(text: string): string {
 
 function extractLocales(text: string): string[] {
     // Object form: locales: [{ locale: "en", label: "..." }, ...]
-    const objectKeys = [...text.matchAll(/locale:\s*['"](\w+)['"]/g)].map((m) => m[1]);
+    // The `(?:^|[{,\s])` guard prevents matching `default_locale: "en"` — an
+    // unguarded /locale:/ also matches the tail of `default_locale`, which used
+    // to make array-form configs resolve to just the default locale.
+    const objectKeys = [
+        ...text.matchAll(/(?:^|[{,\s])locale:\s*['"]([\w-]+)['"]/g),
+    ].map((m) => m[1]);
 
     if (objectKeys.length > 0) {
         return objectKeys;
     }
 
-    // Array form: locales: ["en", "fr", "de"]
-    const block = text.match(/locales:\s*\[([^\]]*)\]/);
+    // Array form: locales: ["en", "fr", "de"]. The negative lookbehind keeps
+    // `initial_locales` out while still allowing an inline single-line config
+    // such as `i18n: { default_locale: 'en', locales: ['en','fr'] }`.
+    const block = text.match(/(?<![\w])locales:\s*\[([^\]]*)\]/);
 
     if (block) {
-        return [...block[1].matchAll(/['"](\w+)['"]/g)].map((m) => m[1]);
+        return [...block[1].matchAll(/['"]([\w-]+)['"]/g)].map((m) => m[1]);
     }
 
     return [];
@@ -369,11 +407,16 @@ function readI18nConfigPath(cwd: string, configArg: string | undefined): string 
 
     fail(
         "未找到 Sveltia CMS 配置文件（默认查找 sveltia-cms.config.mjs）。\n" +
-            "      请通过 --config <path> 指定，或先运行 `npx sveltia-cms init` 生成配置。",
+            "      请通过 --config <path> 指定，或在项目根目录创建 `sveltia-cms.config.mjs`（见 README）。",
     );
 }
 
 export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
+    if (args.includes("--check")) {
+        checkI18nTemplates(cwd);
+        return;
+    }
+
     const force = args.includes("--force") || args.includes("--force=true");
     const configArg = readArgValue(args, "--config");
     const contentRoot = readArgValue(args, "--content-root") ?? "src/content";
@@ -475,54 +518,145 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
     );
     const glossary = glossaryTemplate.replace(/__PROJECT_NAME__/g, projectName);
 
-    // remap-translations.sh is copied verbatim (positional args, no placeholders).
     const remapTemplate = readFileSync(
         resolveI18nTemplatePath("remap-translations.sh"),
         "utf-8",
     );
 
-    const writes = [
+    // All three artifacts carry a version marker so upgrades can be detected.
+    const stamped = (template: string): string =>
+        template.replace(/__TEMPLATE_VERSION__/g, I18N_TEMPLATE_VERSION);
+    const versionComment = `<!-- ${I18N_TEMPLATE_MARKER}${I18N_TEMPLATE_VERSION} -->`;
+
+    /**
+     * Upgrades a user-editable file (the glossary) by only refreshing the
+     * version marker — the user's terms are preserved verbatim. Required so
+     * `init:i18n --check` can pass after upgrading from a pre-0.3.5 release.
+     */
+    const restampContent = (existing: string): string => {
+        const markerRe = /<!--\s*astro-sveltia-pages i18n template v[\d.]+\s*-->/;
+
+        if (markerRe.test(existing)) {
+            return existing.replace(markerRe, versionComment);
+        }
+
+        return `${versionComment}\n${existing}`;
+    };
+
+    // `generated` artifacts are owned by this package and are upgraded in place
+    // when an older template version is detected. `content` (the glossary) is
+    // user-editable, so it is only created once and never auto-overwritten.
+    const writes: {
+        rel: string;
+        content: string;
+        mode: number;
+        kind: "generated" | "content";
+    }[] = [
         {
             rel: join(".github", "workflows", "i18n-translate.yml"),
-            content: workflow,
+            content: stamped(workflow),
             mode: 0o644,
+            kind: "generated",
         },
-        { rel: join("i18n", "glossary.md"), content: glossary, mode: 0o644 },
+        {
+            rel: join("i18n", "glossary.md"),
+            content: stamped(glossary),
+            mode: 0o644,
+            kind: "content",
+        },
         {
             rel: join("scripts", "remap-translations.sh"),
-            content: remapTemplate,
+            content: stamped(remapTemplate),
             mode: 0o755,
+            kind: "generated",
         },
     ];
 
+    const stale: { rel: string; from: string }[] = [];
     let wrote = 0;
+    let upgraded = 0;
     let skipped = 0;
 
     for (const entry of writes) {
         const target = join(cwd, entry.rel);
 
-        if (existsSync(target) && !force) {
+        if (!existsSync(target)) {
+            mkdirSync(dirname(target), { recursive: true });
+            writeFileSync(target, entry.content, { mode: entry.mode });
+            console.log(`${LOG_PREFIX} 已写入 ${entry.rel}`);
+            wrote += 1;
+            continue;
+        }
+
+        const existing = readFileSync(target, "utf-8");
+        const foundVersion = readI18nTemplateVersion(existing);
+        // A user-editable file without our marker is still "ours" if it sits at
+        // the generated path: we only restamp it, never replace its content.
+        const isLegacyGenerated =
+            foundVersion === null && existing.includes("astro-sveltia-pages");
+        const outdated =
+            foundVersion !== null
+                ? compareVersions(foundVersion, I18N_TEMPLATE_VERSION) < 0
+                : entry.kind === "content" || isLegacyGenerated;
+
+        if (force) {
+            mkdirSync(dirname(target), { recursive: true });
+            writeFileSync(target, entry.content, { mode: entry.mode });
+            console.log(`${LOG_PREFIX} 已强制覆盖 ${entry.rel}`);
+            wrote += 1;
+            continue;
+        }
+
+        if (outdated) {
+            stale.push({ rel: entry.rel, from: foundVersion ?? "旧版（无版本标记）" });
+
+            if (entry.kind === "content") {
+                // Preserve every user-added glossary term; only the marker moves.
+                writeFileSync(target, restampContent(existing), { mode: entry.mode });
+                console.log(
+                    `${LOG_PREFIX} ⬆ 已更新 ${entry.rel} 的版本标记（内容保持不变）。`,
+                );
+                upgraded += 1;
+                continue;
+            }
+
+            // Keep the previous file next to the new one; the .bak suffix is not
+            // picked up by GitHub Actions as a workflow and can be deleted later.
+            copyFileSync(target, `${target}.bak`);
+            writeFileSync(target, entry.content, { mode: entry.mode });
+            console.log(
+                `${LOG_PREFIX} ⬆ 已升级 ${entry.rel}（${foundVersion ?? "旧版"} → ${I18N_TEMPLATE_VERSION}），原文件备份为 ${entry.rel}.bak`,
+            );
+            upgraded += 1;
+            continue;
+        }
+
+        if (foundVersion === null && entry.kind === "generated") {
             console.error(
-                `${LOG_PREFIX} ${entry.rel} 已存在，跳过（用 --force 覆盖）。`,
+                `${LOG_PREFIX} ⚠️ ${entry.rel} 已存在且不是本包生成的文件，未改动（确认可覆盖请加 --force）。`,
             );
             skipped += 1;
             continue;
         }
 
-        mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, entry.content, { mode: entry.mode });
-        console.log(`${LOG_PREFIX} 已写入 ${entry.rel}`);
-        wrote += 1;
+        skipped += 1;
     }
 
-    if (skipped > 0 && wrote === 0) {
+    if (upgraded > 0) {
+        console.log(`
+${LOG_PREFIX} ⚠️ 已从旧版模板升级到 ${I18N_TEMPLATE_VERSION}：
+${stale.map((item) => `   • ${item.rel}（${item.from}）`).join("\n")}
+${I18N_UPGRADE_NOTICE}
+   旧文件已备份为 *.bak，确认升级无误后可删除，或加入 .gitignore。
+`);
+    } else if (skipped > 0 && wrote === 0) {
         console.error(
             `${LOG_PREFIX} 三份文件均已存在，未做任何改动（--force 可覆盖）。`,
         );
     }
 
     console.log(`
-${LOG_PREFIX} i18n 自动翻译已初始化（源语言 ${defaultLocale} → ${targetLangs.join(", ")}）。
+${LOG_PREFIX} i18n 自动翻译已初始化（模板 ${I18N_TEMPLATE_VERSION}，源语言 ${defaultLocale} → ${targetLangs.join(", ")}）。
 
 下一步（必做）：
 1. 仓库 Secret（Settings → Secrets and variables → Actions → New repository secret）：
@@ -533,6 +667,8 @@ ${LOG_PREFIX} i18n 自动翻译已初始化（源语言 ${defaultLocale} → ${t
 3. ⚠️ 提交信息里绝不能出现方括号包裹的 CI 跳过标记（如 [skip ci] / [ci skip]），
    否则整次 push 的工作流与 CF 部署都会被跳过。
 4. 推送一个 ${defaultLocale} 源文件（如 ${enPaths[0]}）即可触发 i18n-translate。
+5. 每次升级 astro-sveltia-pages 后重跑 \`${I18N_UPGRADE_COMMAND}\`
+   （或 \`${I18N_CHECK_COMMAND}\` 在 CI 中拦截过期模板）。
 `);
 }
 

@@ -1,11 +1,23 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import jsYaml from "js-yaml";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-import { runInitI18n } from "../src/cli.ts";
+import {
+    I18N_GENERATED_FILES,
+    I18N_TEMPLATE_VERSION,
+    checkI18nTemplates,
+    runInitI18n,
+} from "../src/cli.ts";
 
 const tempDirs: string[] = [];
 
@@ -163,6 +175,259 @@ describe("init:i18n — error handling", () => {
         } finally {
             console_.restore();
             exitSpy.mockRestore();
+        }
+    });
+});
+
+// Array-form `locales: ["en", "fr"]` plus `default_locale: "en"` used to resolve
+// to just ["en"] because /locale:/ also matched the tail of `default_locale`.
+// This is the shape used by real consumer repos (e.g. nextcharm/charmost).
+const ARRAY_LOCALES_CONFIG = `export default {
+  i18n: {
+    structure: 'multiple_folders',
+    default_locale: 'en',
+    locales: ['en', 'fr', 'de', 'ja'],
+  },
+  collections: [
+    {
+      name: 'blog',
+      folder: 'src/content/blog',
+      i18n: { save_all_locales: false, initial_locales: ['en'] },
+    },
+  ],
+};
+`;
+
+describe("init:i18n — locale parsing regression (0.3.5)", () => {
+    it("parses array-form locales without being confused by default_locale / initial_locales", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), ARRAY_LOCALES_CONFIG);
+
+        runInitI18n([], cwd);
+
+        const workflow = readFileSync(
+            join(cwd, ".github", "workflows", "i18n-translate.yml"),
+            "utf-8",
+        );
+        const doc = jsYaml.load(workflow) as YamlDoc;
+        expect(doc.env.TARGET_LANGS).toBe("de,fr,ja");
+        expect(doc.on.push.paths).toEqual(["src/content/blog/en/**"]);
+    });
+
+    it("parses a single-line inline i18n config (real-world shape)", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            `export default {
+  i18n: { structure: 'multiple_folders', default_locale: 'en', locales: ['en','fr','de','ja'] },
+  collections: [
+    { name: 'blog', folder: 'src/content/blog', i18n: { save_all_locales: false, initial_locales: ['en'] } },
+  ],
+};
+`,
+        );
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        expect(doc.env.TARGET_LANGS).toBe("de,fr,ja");
+    });
+
+    it("does not mistake initial_locales for the global locales list", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            `export default {
+  collections: [
+    { name: 'blog', folder: 'blog', i18n: { initial_locales: ['xx'] } },
+  ],
+  i18n: { default_locale: 'en', locales: ['en', 'es'] },
+};
+`,
+        );
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        expect(doc.env.TARGET_LANGS).toBe("es");
+    });
+
+    it("preserves hyphenated / uppercase-region locale codes", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            `export default {
+  i18n: {
+    structure: 'multiple_folders',
+    default_locale: 'en',
+    locales: [
+      { locale: 'en' },
+      { locale: 'zh-CN' },
+      { locale: 'pt-BR' },
+    ],
+  },
+  collections: [
+    { name: 'blog', folder: 'src/content/blog', i18n: { save_all_locales: false, initial_locales: ['en'] } },
+  ],
+};
+`,
+        );
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        // Case must survive: Sveltia folder names are case-sensitive, and remap
+        // maps pelikhan's lowercased {{lang}} back to these exact strings.
+        expect(doc.env.TARGET_LANGS).toBe("pt-BR,zh-CN");
+    });
+});
+
+function workflowPath(cwd: string): string {
+    return join(cwd, ".github", "workflows", "i18n-translate.yml");
+}
+
+describe("init:i18n — template version stamping & upgrade (0.3.5)", () => {
+    it("stamps all three generated files with the current template version", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+
+        runInitI18n([], cwd);
+
+        for (const rel of I18N_GENERATED_FILES) {
+            const content = readFileSync(join(cwd, rel), "utf-8");
+            expect(content).toContain(
+                `astro-sveltia-pages i18n template v${I18N_TEMPLATE_VERSION}`,
+            );
+            expect(content).not.toMatch(/__[A-Z0-9_]+__/);
+        }
+    });
+
+    it("--check passes on a freshly generated project", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+        const console_ = captureConsole();
+
+        try {
+            runInitI18n([], cwd);
+            expect(() => checkI18nTemplates(cwd)).not.toThrow();
+            expect(console_.log.join("\n")).toContain("均为最新版本");
+        } finally {
+            console_.restore();
+        }
+    });
+
+    it("--check fails when generated files are missing or stale", () => {
+        const cwd = makeTempDir();
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code: number,
+        ) => {
+            throw new Error(`process.exit(${String(code)})`);
+        }) as never);
+        const console_ = captureConsole();
+
+        try {
+            expect(() => checkI18nTemplates(cwd)).toThrow(/process\.exit\(1\)/);
+        } finally {
+            console_.restore();
+            exitSpy.mockRestore();
+        }
+    });
+
+    it("auto-upgrades a legacy (unversioned) 0.3.4 workflow and keeps a .bak", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+        const path = workflowPath(cwd);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(
+            path,
+            "# 来源: astro-sveltia-pages —— i18n 自动翻译工作流模板。\nname: old-workflow\n",
+        );
+        const console_ = captureConsole();
+
+        try {
+            runInitI18n([], cwd);
+            const upgraded = readFileSync(path, "utf-8");
+            expect(upgraded).toContain(
+                `astro-sveltia-pages i18n template v${I18N_TEMPLATE_VERSION}`,
+            );
+            expect(upgraded).toContain("i18n-staging");
+            expect(existsSync(`${path}.bak`)).toBe(true);
+            expect(readFileSync(`${path}.bak`, "utf-8")).toContain(
+                "name: old-workflow",
+            );
+            expect(console_.log.join("\n")).toContain("已升级");
+            // After the upgrade the CI gate passes.
+            expect(() => checkI18nTemplates(cwd)).not.toThrow();
+        } finally {
+            console_.restore();
+        }
+    });
+
+    it("upgrades an outdated stamped workflow but leaves a same-version one untouched", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+        const path = workflowPath(cwd);
+        const console_ = captureConsole();
+
+        try {
+            runInitI18n([], cwd);
+            const current = readFileSync(path, "utf-8");
+
+            // Same version -> no rewrite.
+            runInitI18n([], cwd);
+            expect(readFileSync(path, "utf-8")).toBe(current);
+
+            // Older version -> auto-upgrade.
+            writeFileSync(path, current.replace(`v${I18N_TEMPLATE_VERSION}`, "v0.3.4"));
+            runInitI18n([], cwd);
+            expect(readFileSync(path, "utf-8")).toContain(
+                `astro-sveltia-pages i18n template v${I18N_TEMPLATE_VERSION}`,
+            );
+        } finally {
+            console_.restore();
+        }
+    });
+
+    it("restamps an old glossary without discarding user-added terms", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+        const path = join(cwd, "i18n", "glossary.md");
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, "# Translation Glossary\n\n- MyBrandTerm\n- ACME-9000\n");
+        const console_ = captureConsole();
+
+        try {
+            runInitI18n([], cwd);
+            const content = readFileSync(path, "utf-8");
+            expect(content).toContain("MyBrandTerm");
+            expect(content).toContain("ACME-9000");
+            expect(content).toContain(
+                `astro-sveltia-pages i18n template v${I18N_TEMPLATE_VERSION}`,
+            );
+            expect(() => checkI18nTemplates(cwd)).not.toThrow();
+        } finally {
+            console_.restore();
+        }
+    });
+
+    it("does not overwrite a foreign workflow unless --force is given", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+        const path = workflowPath(cwd);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, "name: my-own-workflow\non: push\n");
+        const console_ = captureConsole();
+
+        try {
+            runInitI18n([], cwd);
+            expect(readFileSync(path, "utf-8")).toBe(
+                "name: my-own-workflow\non: push\n",
+            );
+
+            runInitI18n(["--force"], cwd);
+            expect(readFileSync(path, "utf-8")).toContain("i18n-staging");
+        } finally {
+            console_.restore();
         }
     });
 });

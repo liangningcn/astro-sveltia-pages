@@ -1,10 +1,22 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { afterAll, describe, expect, it, vi } from "vitest";
 
+import {
+    I18N_GENERATED_FILES,
+    I18N_TEMPLATE_MARKER,
+    I18N_TEMPLATE_VERSION,
+} from "../src/i18n-template-check.ts";
 import sveltiaPages from "../src/index.ts";
 import type { SveltiaPagesOptions } from "../src/options.ts";
 
@@ -218,5 +230,82 @@ describe("sveltiaPages — astro:build:done artifacts", () => {
                 "[astro-sveltia-pages] Failed to write the admin UI files",
             );
         }
+    });
+});
+
+describe("sveltiaPages — build-time i18n upgrade notice", () => {
+    function writeStampedFiles(root: URL, version: string | null): void {
+        for (const rel of I18N_GENERATED_FILES) {
+            const target = join(fileURLToPath(root), rel);
+            mkdirSync(dirname(target), { recursive: true });
+            writeFileSync(
+                target,
+                version === null
+                    ? "# legacy unversioned file\n"
+                    : `<!-- ${I18N_TEMPLATE_MARKER}${version} -->\n`,
+            );
+        }
+    }
+
+    async function runSetup(root: URL, opts: Partial<SveltiaPagesOptions> = {}) {
+        const integration = sveltiaPages({ ...baseOptions, ...opts });
+        const logger = makeLogger();
+
+        await integration.hooks["astro:config:setup"]!({
+            config: { site: "https://example.com", root } as never,
+            createCodegenDir: () => makeTempDir(),
+            logger: logger as never,
+        } as never);
+
+        return logger;
+    }
+
+    it("stays silent when i18n was never initialised", async () => {
+        const logger = await runSetup(makeTempDir());
+        expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it("stays silent when the generated files are current", async () => {
+        const root = makeTempDir();
+        writeStampedFiles(root, I18N_TEMPLATE_VERSION);
+
+        const logger = await runSetup(root);
+        expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it("warns with the canonical pnpm fix command when files are stale", async () => {
+        const root = makeTempDir();
+        writeStampedFiles(root, "0.3.4");
+
+        const logger = await runSetup(root);
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        const message = (logger.warn.mock.calls[0]?.[0] as string) ?? "";
+
+        expect(message).toContain("升级 astro-sveltia-pages 后必须重新运行");
+        expect(message).toContain("pnpm exec astro-sveltia-pages init:i18n");
+        expect(message).not.toContain("npx");
+    });
+
+    it('fails the build when i18nTemplateCheck is "error"', async () => {
+        const root = makeTempDir();
+        writeStampedFiles(root, null);
+
+        await expect(runSetup(root, { i18nTemplateCheck: "error" })).rejects.toThrow(
+            /pnpm exec astro-sveltia-pages init:i18n/,
+        );
+    });
+
+    it('is silent when i18nTemplateCheck is "off"', async () => {
+        const root = makeTempDir();
+        writeStampedFiles(root, "0.3.4");
+
+        const logger = await runSetup(root, { i18nTemplateCheck: "off" });
+        expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it("rejects an invalid i18nTemplateCheck value eagerly", () => {
+        expect(() =>
+            sveltiaPages({ ...baseOptions, i18nTemplateCheck: "nope" as "warn" }),
+        ).toThrow(/i18nTemplateCheck/);
     });
 });

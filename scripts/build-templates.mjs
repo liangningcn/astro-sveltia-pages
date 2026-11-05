@@ -118,18 +118,18 @@ async function buildI18nTemplates() {
     await mkdir(distDir, { recursive: true });
     await cp(srcDir, distDir, { recursive: true });
 
-    // Guard: assert each template still carries the placeholders the CLI replaces.
-    // If a placeholder is removed by mistake, fail the build so it does not ship broken.
-    // remap-translations.sh intentionally carries no placeholders: it takes
-    // content_root and staging_dir as positional arguments at runtime.
+    // Guard: assert each template still carries the placeholders the CLI replaces,
+    // plus the version marker used by `init:i18n --check` to detect stale files.
     const required = {
         "i18n-translate.yml": [
+            "__TEMPLATE_VERSION__",
             "__CONTENT_ROOT__",
             "__COLLECTION_EN_PATH__",
             "__TARGET_LANGS__",
             "__CONFIG_FILE__",
         ],
-        "glossary.md": ["__PROJECT_NAME__"],
+        "glossary.md": ["__TEMPLATE_VERSION__", "__PROJECT_NAME__"],
+        "remap-translations.sh": ["__TEMPLATE_VERSION__"],
     };
 
     for (const [file, placeholders] of Object.entries(required)) {
@@ -156,6 +156,78 @@ async function buildI18nTemplates() {
         if (content.includes("__UNKNOWN__")) {
             throw new Error(
                 `i18n template ${I18N_TEMPLATE_DIR}/${file} has an unreplaced token.`,
+            );
+        }
+    }
+
+    // Guard the hard-won CI fixes. These are easy to "clean up" by mistake and
+    // each one caused a real production failure in 0.3.4.
+    const workflow = await readFile(join(srcDir, "i18n-translate.yml"), "utf-8");
+    const invariants = [
+        ['STAGING_DIR: "i18n-staging"', "non-hidden staging dir (glob skips dot dirs)"],
+        ["pelikhan/action-continuous-translation@v0.2.11", "pinned action version"],
+        ["openai:deepseek-flash", "current DeepSeek model id"],
+        ["Reclaim ownership of Docker-generated files", "Docker root permission fix"],
+        ["Verify translations were produced", "zero-translation failure gate"],
+        ["Fail when translation did not succeed", "publish-side failure gate"],
+        ["filename_template:", "explicit translation filename template"],
+        [
+            "tr '[:upper:]' '[:lower:]'",
+            "pelikhan lowercases {{lang}} in output filenames",
+        ],
+        [
+            "Report i18n template version",
+            "self-reporting workflow version in Actions logs",
+        ],
+        [
+            "pnpm exec astro-sveltia-pages init:i18n",
+            "canonical pnpm upgrade command in the notice",
+        ],
+    ];
+
+    for (const [needle, label] of invariants) {
+        if (!workflow.includes(needle)) {
+            throw new Error(
+                `i18n workflow template lost a required fix: ${label} (${needle}).`,
+            );
+        }
+    }
+
+    const remap = await readFile(join(srcDir, "remap-translations.sh"), "utf-8");
+    const remapInvariants = [
+        ["canonical_lang", "restore Sveltia locale casing in output paths"],
+        ["lower()", "case-insensitive language matching"],
+        ['mv -f "$f"', "plain mv instead of git mv"],
+    ];
+
+    for (const [needle, label] of remapInvariants) {
+        if (!remap.includes(needle)) {
+            throw new Error(
+                `i18n remap template lost a required fix: ${label} (${needle}).`,
+            );
+        }
+    }
+
+    // Pre-seeding staging with existing translations defeats the verify gate:
+    // pelikhan never reads target markdown, it only uses its JSON cache.
+    if (
+        /\.i18n-staging|deepseek-v4-flash|mkdir -p \.genaiscript|CONTENT_ROOT\/\$coll\/\$L/.test(
+            workflow,
+        )
+    ) {
+        throw new Error(
+            "i18n workflow template still contains a known-broken 0.3.4 construct.",
+        );
+    }
+
+    // Consumer-facing commands are pnpm-first. A stray `npx` would leave the
+    // docs, CLI output and generated headers inconsistent again.
+    for (const file of files) {
+        const content = await readFile(join(srcDir, file), "utf-8");
+
+        if (/npx\s+astro-sveltia-pages/.test(content)) {
+            throw new Error(
+                `i18n template ${file} uses npx; use "pnpm exec astro-sveltia-pages" instead.`,
             );
         }
     }

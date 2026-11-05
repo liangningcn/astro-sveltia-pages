@@ -35,6 +35,20 @@ Sveltia CMS, wired into Astro with **zero hand-written CMS config**. Built for C
 pnpm add astro-sveltia-pages
 ```
 
+> **⚠️ UPGRADING? READ THIS FIRST** — if you use the i18n auto-translation
+> workflow, **every package upgrade requires re-running
+> `pnpm exec astro-sveltia-pages init:i18n` in each site repository.** The three
+> generated files (`.github/workflows/i18n-translate.yml`, `i18n/glossary.md`,
+> `scripts/remap-translations.sh`) are committed snapshots: `pnpm up` does
+> **not** replace them. Upgrading the dependency while running an old workflow
+> makes translations fail silently and is extremely hard to diagnose.
+>
+> - Fix now: `pnpm exec astro-sveltia-pages init:i18n` (auto-upgrades, keeps `*.bak`)
+> - CI gate: `pnpm exec astro-sveltia-pages init:i18n --check`
+> - Since 0.3.5 `astro dev` / `astro build` also print a prominent warning when
+>   stale templates are detected. Pass `i18nTemplateCheck: "error"` to the
+>   integration to fail the build instead, or `"off"` to silence it.
+
 ## Quick Start
 
 Register the integration in `astro.config.mjs`:
@@ -382,15 +396,27 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             - `--collections <a,b,c>` — only wire in these collections
             - `--skip-collections <a,b>` — always exclude these collections
             - `--force` — overwrite files that already exist
+            - `--check` — verify generated files are current (exits non-zero if stale; use in CI)
 
-            Existing files are skipped (not overwritten) unless `--force` is given.
+            Generated files carry a version stamp. Re-running `init:i18n` **automatically
+            upgrades** outdated generated files (the previous copy is kept as `*.bak`);
+            the user-editable `i18n/glossary.md` is never auto-overwritten. `--force`
+            overwrites everything.
+
+> ⚠️ **After upgrading `astro-sveltia-pages`, always re-run `init:i18n`.** The three
+> files are generated snapshots committed to your repo — bumping the dependency
+> alone does **not** update them, so the workflow keeps running the old (possibly
+> broken) version. Since 0.3.5 the integration also warns during `astro dev` /
+> `astro build`; add `pnpm exec astro-sveltia-pages init:i18n --check` to your CI
+> to catch stale templates automatically (or set `i18nTemplateCheck: "error"`).
 
 2.  Add the GitHub repository secret
     (**Settings → Secrets and variables → Actions → New repository secret**):
 
     - `DEEPSEEK_API_KEY` — a DeepSeek API key (`sk-…`) from
       <https://platform.deepseek.com>. The workflow calls DeepSeek's OpenAI-compatible
-      endpoint `https://api.deepseek.com` with `deepseek-v4-flash`.
+      endpoint `https://api.deepseek.com` with `deepseek-flash` (the old
+      `deepseek-v4-flash` name has been retired).
 
 3.  In your Sveltia CMS config, **every collection you want auto-translated must set**:
 
@@ -412,10 +438,17 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
     triggers `i18n-translate`, which translates the change into every target locale,
     self-checks the output, and commits it back to `main` (`PUBLISH_MODE: "commit"`).
     Set `PUBLISH_MODE: "pr"` in the generated workflow to require a human merge
-    instead.
+    instead. The English source goes live immediately; all target locales are
+    published together in one follow-up commit. Since 0.3.5 the workflow explicitly
+    **fails** (and opens an issue) when no translations were produced instead of
+    reporting a green run.
 
-> **Incremental & manual backfill:** existing translations are reused, so reruns only
-> fill gaps. To bootstrap an already-populated site, run the workflow manually
+> **Incremental & manual backfill:** the workflow caches pelikhan's per-locale
+> translation JSON (`i18n-translations/<lang>.json`) via `actions/cache`, so reruns
+> only re-translate changed nodes. Note that pelikhan regenerates translated files
+> from the English source plus that cache — it does **not** read existing translated
+> markdown, so manual edits to translated files are overwritten on the next run.
+> To bootstrap an already-populated site, run the workflow manually
 > (`workflow_dispatch`) with `force` + a `scope` regex (e.g. `posts`).
 
 ### Read-only mode

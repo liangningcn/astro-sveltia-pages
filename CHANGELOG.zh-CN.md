@@ -8,6 +8,40 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.3.5
+
+内置 i18n 翻译工作流的紧急修复版本。0.3.4 虽然加入了绕过上游文件过滤的暂存方案，但从未在真实 CI 中验证过；多项缺陷导致**即使重新生成工作流也可能一篇译文都产不出来**。
+
+### 修复
+
+- **暂存目录是隐藏目录。** 0.3.4 使用 `.i18n-staging`（以点开头）。GenAIScript 的文件 glob 默认忽略点目录，导致 `pelikhan/action-continuous-translation` 拿不到任何文件，报 `No files or not matching languages selected.`。现改为普通目录 `i18n-staging/`，并在翻译前增加自检：暂存路径若含两位语言码目录段或 `.{lang}.md` 文件名后缀，直接报错。
+- **Docker root 权限。** 翻译 Action 以 root 运行并创建 `.genaiscript/`，随后的 `mkdir -p .genaiscript/cache` 报 `mkdir: Permission denied`，直接让 translate job 失败。现在用 `sudo chown` 收回所有生成目录的归属权，清理步骤带 `sudo` 兜底，宿主侧不再执行任何 `mkdir`。
+- **"全绿但零译文"的静默失败。** `genaiscript: cancelled` 退出码为 0，此前整条流水线会显示成功。新增 `Verify translations were produced` 步骤，逐个断言（源文件 × 目标语言）译文存在且非空；`Fail when no translations were published` 闸门会让 publish job 显式失败。失败仍自动建 issue，并附带可操作的排查清单。
+- **`remap-translations.sh` 对未跟踪的暂存文件使用 `git mv`**，会报 `not under version control`。现改为普通 `mv`（由工作流的 `git add -A` 负责纳入版本控制），通过 `.sources` 清单排除英文源，用 `TARGET_LANGS` 白名单而非宽松正则校验语言，并在零映射时失败。
+- **翻译缓存路径错误。** 旧模板缓存 `.genaiscript/cache`，而 pelikhan 的增量缓存实际写在 `<translations_dir>/<lang>.json`。现显式设置 `translations_dir: i18n-translations` 并缓存该目录。
+- **上游 Action 未固定 / 模型已退役。** `pelikhan/...@v0` 固定为 `@v0.2.11`；显式设置 `filename_template`，避免 remap 与上游默认值漂移。模型 id 改为 `deepseek-flash`（DeepSeek 已让 `deepseek-v4-flash` 退役）。
+- **`init:i18n` 语言解析错误。** 对象形式的正则 `/locale:/` 会误匹配 `default_locale: "en"` 的尾部，导致数组形式 `locales: ["en","fr"]` 只解析出 `["en"]`，命令报错"没有可翻译的目标语言"。CLI 与工作流校验脚本现都要求词边界，且只匹配独立的 `locales:` 键。
+- **生成工作流的 detect 步骤**在读取 frontmatter 前未确认文件存在，遇到"仅删除文件"的 push 会因 `sh()` 报错而崩溃。现补上 `fs.existsSync` 守卫。
+- **预拷已有译文会让失败闸门失效。** 暂存步骤原本会把已有译文复制进暂存目录；但 pelikhan 从不读取目标译文 Markdown（增量状态在 `translations_dir/<lang>.json` 里），这些旧文件会让 `Verify translations were produced` 在"本次一篇都没产出"时依然通过，重新制造静默成功。现在暂存目录只放英文源。
+- **带大写区域码的语言码。** pelikhan 用 `to.toLowerCase()` 渲染 `{{lang}}`，所以 `zh-CN` 实际产出 `{slug}.zh-cn.md`；而校验与 `remap-translations.sh` 用的是 `TARGET_LANGS` 原始大小写，会找不到文件。现在两处比对统一转小写，remap 在写入 `multiple_folders` 目录时再把语言码映射回 Sveltia 配置里的原始写法。
+
+### 新增
+
+- **生成文件版本标记与升级检测。** 三份生成文件都带 `astro-sveltia-pages i18n template vX.Y.Z` 标记。重跑 `init:i18n` 会**自动升级**过期的生成文件（旧文件备份为 `*.bak`），而不是静默跳过；供用户编辑的 `i18n/glossary.md` 永不自动覆盖。这修复了"包升级了但翻译还是坏"的根本原因——消费方仓库里的 workflow 是提交进 git 的生成快照，升级依赖不会替换它。
+- **`init:i18n --check`** — CI 门禁：任一生成文件缺失或过期即以非零码退出。
+- `check:templates` 现在断言 0.3.5 的所有修复点仍在，并拒绝已知的 0.3.4 破坏性写法（隐藏暂存目录、退役模型 id、宿主侧 `.genaiscript` mkdir）。
+- **构建时升级告警。** `astro dev` / `astro build` 会比对已安装包的版本与三份已提交 i18n 文件的版本标记，过期时打印醒目提示。这正是 `pnpm up` 之后使用者必然会执行的命令，提示不再只躺在 README 里。新增集成选项 `i18nTemplateCheck: "warn" | "error" | "off"`（默认 `warn`），`"error"` 可直接让构建失败、兼作 CI 门禁；未启用 i18n 时完全静默。
+- **工作流自报版本。** 每次运行都会打印本文件由哪个模板版本生成（`Report i18n template version`），Actions 日志里一眼就能看出是否还在跑旧版。`init:i18n --check` 现在输出同一份标准提示与确切的修复命令，不再是笼统报错。
+- **统一使用 pnpm 命令。** 所有面向使用者的示例、生成文件头注释与 CLI 输出统一为 `pnpm exec astro-sveltia-pages ...`。
+
+### 迁移（从 0.3.4）
+
+- **在每一个消费方仓库重跑 `pnpm exec astro-sveltia-pages init:i18n`，这是必须步骤。** 只升级依赖不会替换已提交的 `.github/workflows/i18n-translate.yml`、`i18n/glossary.md`、`scripts/remap-translations.sh`。该命令会检测旧文件、自动升级，并保留 `*.bak` 备份供核对（确认无误后删除或加入 `.gitignore`）。
+- 可选：在 CI 中加入 `pnpm exec astro-sveltia-pages init:i18n --check`，防止今后再出现"包升级了、模板没跟上"。
+- CMS 配置无需改动。提交信息仍须避免方括号包裹的 CI 跳过标记（`[skip ci]` 等）。
+
+---
+
 ## 0.3.4
 
 ### 新增

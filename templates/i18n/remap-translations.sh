@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
+# astro-sveltia-pages i18n template v__TEMPLATE_VERSION__
 # scripts/remap-translations.sh —— 由 `astro-sveltia-pages init:i18n` 生成。
+#
+# ⚠️ 升级 astro-sveltia-pages 后必须重新运行 `pnpm exec astro-sveltia-pages init:i18n`
+#    （CLI 会自动检测旧版模板并升级，同时备份原文件）。只升级依赖不会更新本文件。
 #
 # 将 pelikhan/action-continuous-translation 在暂存目录里产出的
 #   {staging}/{collection}/{slug}.{lang}.md
@@ -9,13 +13,20 @@
 # 用法:
 #   bash scripts/remap-translations.sh "<content_root>" "<staging_dir>"
 #     content_root: 内容根目录，如 "src/content"
-#     staging_dir:  翻译步骤产出的暂存目录，如 ".i18n-staging"
+#     staging_dir:  翻译步骤的暂存目录，如 "i18n-staging"
 #
 # 说明:
-#   - pelikhan 把译文写在暂存目录下、命名为 {slug}.{lang}.md（扁平，无语言目录），
+#   - pelikhan 按 filename_template={{dirname}}/{{basename}}.{{lang}}{{extname}}
+#     把译文写在源文件同目录、命名为 {slug}.{lang}.md（扁平，无语言目录），
 #     这样能绕过 pelikhan 会过滤掉 /xx/ 语言目录文件的兼容性 bug。
-#   - 本脚本只移动形如 {slug}.{lang}.md 的文件（lang 为 2~5 位语言代码），
-#     源文件 {slug}.md（无语言后缀）会被忽略。
+#   - 暂存步骤会写出 .sources 清单（每行一个英文源路径）。本脚本借此排除源文件，
+#     并用 TARGET_LANGS 环境变量作为语言白名单，避免把 slug 中含点的文件名误判。
+#   - pelikhan 用 to.toLowerCase() 渲染 {{lang}}，所以 zh-CN 的译文文件名是
+#     {slug}.zh-cn.md；而 Sveltia 的目录名必须与配置里的写法一致。比对时统一
+#     小写，落盘时再映射回 TARGET_LANGS 中的原始写法。
+#   - 一律用普通 mv（不要用 git 的 mv 子命令）：暂存文件是 untracked 的，
+#     git 的 mv 会报 "not under version control"；后续工作流的
+#     `git add -A "$CONTENT_ROOT"` 会正确识别新增/修改。
 
 set -euo pipefail
 
@@ -27,27 +38,83 @@ if [ ! -d "$STAGE" ]; then
     exit 0
 fi
 
+# 目标语言白名单（来自工作流 env.TARGET_LANGS，逗号分隔）。
+LANGS="${TARGET_LANGS:-}"
+if [ -z "$LANGS" ]; then
+    echo "::warning::TARGET_LANGS 未设置，退回宽松的语言码校验。"
+fi
+
+# 读入源文件清单，用于排除未翻译的英文源。
+declare -A SOURCES=()
+if [ -f "$STAGE/.sources" ]; then
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        SOURCES["$line"]=1
+    done < "$STAGE/.sources"
+fi
+
+lower() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+is_target_lang() {
+    local candidate
+    candidate="$(lower "$1")"
+    [ -n "$LANGS" ] || {
+        echo "$candidate" | grep -Eq '^[a-z]{2,3}(-[a-z]{2,3})?$'
+        return
+    }
+    local l
+    for l in $(echo "$LANGS" | tr ',' ' '); do
+        [ "$(lower "$l")" = "$candidate" ] && return 0
+    done
+    return 1
+}
+
+# 把译文文件名里的小写语言码还原成 Sveltia 配置里的原始语言码。
+canonical_lang() {
+    local candidate
+    candidate="$(lower "$1")"
+    [ -n "$LANGS" ] || { printf '%s' "$candidate"; return; }
+    local l
+    for l in $(echo "$LANGS" | tr ',' ' '); do
+        if [ "$(lower "$l")" = "$candidate" ]; then
+            printf '%s' "$l"
+            return
+        fi
+    done
+    printf '%s' "$candidate"
+}
+
 moved=0
 while IFS= read -r -d '' f; do
+    # 跳过英文源文件本身（有清单时按清单，无清单时按文件名形状兜底）。
+    if [ "${#SOURCES[@]}" -gt 0 ]; then
+        [ -n "${SOURCES[$f]:-}" ] && continue
+    fi
+
     base="$(basename "$f")"          # slug.fr.md
     [ "${base##*.}" = "md" ] || continue
     name="${base%.md}"               # slug.fr
-    lang="${name##*.}"              # fr
-    slug="${name%.*}"               # slug
-    # 仅处理形如 {slug}.{lang}.md 的文件，避免误移源文件 / 其他文件
-    echo "$lang" | grep -Eq '^[a-z]{2,3}(-[a-zA-Z]{2,3})?$' || continue
-    # collection = staging 目录下的相对路径（可能含多级子目录，如 docs/guides）
+    [[ "$name" == *.* ]] || continue  # 无 .{lang}. 段 → 是源文件
+    lang="${name##*.}"               # fr
+    slug="${name%.*}"                # slug
+    is_target_lang "$lang" || continue
+    [ -s "$f" ] || { echo "::warning::跳过空译文: $f"; continue; }
+
+    # collection = 暂存目录下的相对路径（可能含多级子目录，如 docs/guides）
     rel="${f#"$STAGE"/}"            # docs/guides/slug.fr.md
     coll="$(dirname "$rel")"        # docs/guides
-    dest_dir="$CONTENT_ROOT/$coll/$lang"
+    dest_lang="$(canonical_lang "$lang")"
+    dest_dir="$CONTENT_ROOT/$coll/$dest_lang"
     mkdir -p "$dest_dir"
-    if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
-       git ls-files --error-unmatch "$dest_dir/$slug.md" >/dev/null 2>&1; then
-        git mv -f "$f" "$dest_dir/$slug.md"
-    else
-        mv -f "$f" "$dest_dir/$slug.md"
-    fi
+    mv -f "$f" "$dest_dir/$slug.md"
     moved=$((moved + 1))
 done < <(find "$STAGE" -type f -name '*.md' -print0)
 
-echo "remap 完成，共移动 $moved 个文件。"
+echo "remap 完成，共移动 $moved 个译文文件。"
+
+if [ "$moved" -eq 0 ]; then
+    echo "::error::没有任何译文被映射，请检查翻译步骤是否产出 {slug}.{lang}.md。"
+    exit 1
+fi

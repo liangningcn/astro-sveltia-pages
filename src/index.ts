@@ -11,6 +11,11 @@ import {
 } from "./build-config.js";
 import { injectCollectionTypes, writeConfigToDisk } from "./codegen.js";
 import type { PlatformName } from "./functions/adapter.js";
+import {
+    I18N_UPGRADE_COMMAND,
+    formatI18nUpgradeNotice,
+    inspectI18nTemplates,
+} from "./i18n-template-check.js";
 import { LOG_PREFIX, validateOptions, type SveltiaPagesOptions } from "./options.js";
 
 export type { BuildCmsConfigResult } from "./build-config.js";
@@ -94,6 +99,46 @@ function writeAdminFiles(
     }
 }
 
+/**
+ * Warns when the committed `init:i18n` snapshots are older than the installed
+ * package. This runs on every `astro dev` / `astro build` — which is exactly
+ * what a user does right after `pnpm up` — so the upgrade notice reaches people
+ * who never open the README. Silent when i18n was never initialised.
+ */
+function checkI18nTemplatesAtBuild(
+    root: URL | undefined,
+    mode: SveltiaPagesOptions["i18nTemplateCheck"],
+    logger: AstroIntegrationLogger,
+): void {
+    if (mode === "off" || !root) {
+        return;
+    }
+
+    let status;
+
+    try {
+        status = inspectI18nTemplates(fileURLToPath(root));
+    } catch {
+        // Virtual / non-file roots (e.g. unit-test configs): nothing to inspect.
+        return;
+    }
+
+    if (!status.enabled || !status.outdated) {
+        return;
+    }
+
+    const notice = `${LOG_PREFIX} ${formatI18nUpgradeNotice(status)}`;
+
+    if (mode === "error") {
+        logger.error(notice);
+        throw new Error(
+            `${LOG_PREFIX} i18n 模板已过期，请先运行 ${I18N_UPGRADE_COMMAND}。`,
+        );
+    }
+
+    logger.warn(notice);
+}
+
 export default function sveltiaPages(options: SveltiaPagesOptions): AstroIntegration {
     validateOptions(options);
 
@@ -108,6 +153,12 @@ export default function sveltiaPages(options: SveltiaPagesOptions): AstroIntegra
         name: "astro-sveltia-pages",
         hooks: {
             "astro:config:setup": ({ config, createCodegenDir, logger }) => {
+                checkI18nTemplatesAtBuild(
+                    config.root as URL | undefined,
+                    options.i18nTemplateCheck,
+                    logger,
+                );
+
                 const { config: generated, conflicts } = buildCmsConfig(
                     options,
                     config.site,
