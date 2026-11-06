@@ -131,6 +131,51 @@ describe("init:i18n — first run", () => {
         ).toBe(true);
     });
 
+    it("stamps 0.4.2 retry + destination guards into the generated workflow", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+
+        runInitI18n([], cwd);
+
+        const workflow = readFileSync(workflowPath(cwd), "utf-8");
+        type Step = {
+            name?: string;
+            if?: string;
+            run?: string;
+            uses?: string;
+            with?: Record<string, string>;
+            env?: Record<string, string>;
+        };
+        const doc = jsYaml.load(workflow) as {
+            env: Record<string, string>;
+            jobs: { translate: { steps: Step[] } };
+        };
+        const steps = doc.jobs.translate.steps;
+        const names = steps.map((step) => step.name);
+
+        expect(doc.env.ALLOW_PARTIAL_TRANSLATIONS).toBe("true");
+        expect(names).toContain("Install translation verifier");
+        expect(names).toContain("Retry missing languages once");
+        expect(names).toContain("Verify translations after retry");
+        expect(names).toContain("Verify destination layout");
+
+        const retry = steps.find(
+            (step) => step.name === "Retry missing languages once",
+        );
+        expect(retry?.uses).toBe("pelikhan/action-continuous-translation@v0.2.11");
+        expect(retry?.with?.lang).toBe("${{ steps.verify.outputs.missing_langs }}");
+        expect(retry?.env?.GENAISCRIPT_MODEL_TRANSLATION).toBe(
+            "openai:${{ env.TRANSLATION_MODEL }}",
+        );
+
+        // The verifier is written by a heredoc: the delimiter must appear twice
+        // (open + close) or the following steps would be swallowed by the shell.
+        const installer = steps.find(
+            (step) => step.name === "Install translation verifier",
+        );
+        expect(installer?.run?.split("VERIFY_EOF").length).toBe(3);
+    });
+
     it("derives the wildcard trigger from --content-root, not from collections", () => {
         const cwd = makeTempDir();
         writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);

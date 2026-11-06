@@ -426,6 +426,15 @@ export const collections = {
       导致一篇译文都产不出（0.4.1 已修）。翻译前还有
       **Preflight translation credentials** 步骤校验 Key 并打印可用模型列表。
 
+        **0.4.2 起**：翻译先做一次非致命校验；若个别语言因为模型没按
+        ` ```Tnnn ` 代码围栏输出而缺译文，工作流会清掉坏缓存、只对这些语言
+        干净重试一次。重试后仍缺失时按 `ALLOW_PARTIAL_TRANSLATIONS`（默认
+        `"true"`）告警并发布已成功的语言，不会因为 1 个语言失败丢掉其余 14 个；
+        设 `"false"` 可恢复「缺一即失败」的严格模式。落盘后还会用
+        **Verify destination layout** 校验译文确实位于
+        `<content-root>/<collection>/<lang>/<slug>.md`（例如
+        `src/content/blog/fr/<slug>.md`）。
+
 3.  给 Sveltia CMS 的**每个集合**加一个「自动翻译」开关（并写进 `_template.md`，
     让新建文章默认关闭）：
 

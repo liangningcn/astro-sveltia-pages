@@ -27,6 +27,8 @@
 #   - 一律用普通 mv（不要用 git 的 mv 子命令）：暂存文件是 untracked 的，
 #     git 的 mv 会报 "not under version control"；后续工作流的
 #     `git add -A "$CONTENT_ROOT"` 会正确识别新增/修改。
+#   - 0.4.2 起在写入前断言目标目录名就是目标语言码，并在工作流里再校验一次
+#     git 暂存区：译文只允许出现在 <content_root>/<collection>/<lang>/ 下。
 #   - 覆盖策略（工作流 env.OVERWRITE_MODE）：
 #       all     —— 默认，覆盖已存在的译文（开关打开即由 CI 维护全部语言）；
 #       missing —— 只补缺失译文，已存在的一律保留。
@@ -118,6 +120,14 @@ while IFS= read -r -d '' f; do
     dest_lang="$(canonical_lang "$lang")"
     dest_dir="$CONTENT_ROOT/$coll/$dest_lang"
     dest="$dest_dir/$slug.md"
+
+    # 0.4.2: 落盘结构硬约束。译文必须进入对应语言的文件夹，例如
+    #   src/content/blog/en/<slug>.md  →  src/content/blog/fr/<slug>.md
+    # 绝不能写成 .../blog/<slug>.fr.md（那是暂存目录里的中间文件名）。
+    if [ "$(basename "$dest_dir")" != "$dest_lang" ]; then
+        echo "::error::译文目标路径不在语言目录内: $dest" >&2
+        exit 1
+    fi
 
     # 已存在的译文：按比例决定是否保留。人工锁定优先级最高。
     if [ -f "$dest" ]; then

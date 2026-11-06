@@ -59,6 +59,18 @@
 #      "GitHub authentication required"，0 篇译文，genaiscript 却仍打印 success / exit 0。
 #      翻译步骤现在显式用 step env 注入这些标准变量，并在翻译前做凭证预检。
 #      with 里的三项保留只为兼容上游未来版本，不要把它们当作唯一配置来源。
+#
+#   ⚠️ 0.4.2 修复（偶发「某几种语言 0 篇译文」）：上游把待译节点包成
+#      ┌T000┐…└T000┘ 标记并要求模型用 ```T000 … ``` 代码围栏逐条返回；
+#      DeepSeek 偶尔会直接把输入标记原样抄回来（日志里全是 ┌T000┐），
+#      上游只从代码围栏解析译文 → translations: 0 → "No translations found"。
+#      它内部的 5 次重试又命中 runPrompt(cache:true) 的同一份坏响应
+#      （usage.jsonl 里 4 条 total:0），重试永远不会自愈；随后
+#      Verify 因 2 个语言缺失直接失败，其余 13 个语言的译文全部被丢弃。
+#      本模板：① instructions 强制代码围栏格式；② 先做一次非致命校验，
+#      只把缺失语言清空缓存后单独重跑一次；③ 重试后仍缺失才按
+#      ALLOW_PARTIAL_TRANSLATIONS 决定是告警发布还是终止；④ 落盘后逐条
+#      校验译文确实位于 <content_root>/<collection>/<lang>/<slug>.md。
 # ───────────────────────────────────────────────────────────────────
 
 name: i18n-translate
@@ -109,6 +121,11 @@ env:
     #   missing     → 只补生成缺失的译文，已存在的一律保留（保护人工译文）。
     # 无论哪种，译文 frontmatter 里 `translateLock: true` 的语言版本都永不覆盖。
     OVERWRITE_MODE: "all"
+    # 干净重试后仍有语言缺失时：
+    #   true （默认）→ 告警并发布已成功的语言，不因为 1 个语言失败丢掉其余 14 个；
+    #   false        → 严格模式，终止本次发布（适合要求每篇必须全语种齐全的站点）。
+    # 无论哪种都会打印缺失清单并写入 Step Summary，不会静默。
+    ALLOW_PARTIAL_TRANSLATIONS: "true"
     # 大站切片：单次翻译最多处理的文件数，超出自动拆成并行分片（避免 6h 超时 / 参数溢出）。
     CHUNK_SIZE: "20"
     # 语言单一来源校验：填 Sveltia 配置文件路径，工作流会校验其 locales 与 TARGET_LANGS 一致；
@@ -439,6 +456,82 @@ jobs:
                   fi
                   echo "暂存完成: $STAGE_FILES"
 
+            # (修复 0.4.2) 把「译文完整性」校验写成一份脚本供前后两次调用：
+            # 第一次 soft（只报告缺失语言），重试后再 hard（按策略决定失败/部分发布）。
+            # 放在 RUNNER_TEMP 而不是仓库里，避免多出一个需要提交/升级的模板文件。
+            - name: Install translation verifier
+              run: |
+                  set -euo pipefail
+                  VERIFIER="$RUNNER_TEMP/i18n-verify.sh"
+                  cat > "$VERIFIER" <<'VERIFY_EOF'
+                  #!/usr/bin/env bash
+                  # soft = 只报告并输出缺失语言（供干净重试使用）；hard = 重试后按策略收口。
+                  set -euo pipefail
+                  MODE="${1:-soft}"
+                  STAGE="$STAGING_DIR"
+                  [ -f "$STAGE/.sources" ] || { echo "::error::缺少源文件清单 $STAGE/.sources"; exit 1; }
+                  MISSING=""
+                  LANGS=""
+                  TOTAL=0
+                  while IFS= read -r src; do
+                    [ -z "$src" ] && continue
+                    base="${src%.md}"
+                    for L in $(echo "$TARGET_LANGS" | tr ',' ' '); do
+                      TOTAL=$((TOTAL + 1))
+                      # pelikhan 用 lang: to.toLowerCase() 渲染 filename_template，
+                      # 因此 zh-CN 的译文文件名是 {slug}.zh-cn.md（全小写）。
+                      LL="$(echo "$L" | tr '[:upper:]' '[:lower:]')"
+                      if [ ! -s "$base.$LL.md" ]; then
+                        MISSING="$MISSING $src→$L"
+                        case ",$LANGS," in
+                          *",$L,"*) ;;
+                          *) LANGS="${LANGS:+$LANGS,}$L" ;;
+                        esac
+                      fi
+                    done
+                  done < "$STAGE/.sources"
+                  if [ "$TOTAL" -eq 0 ]; then
+                    echo "::error::源文件清单为空，翻译任务未执行。"
+                    exit 1
+                  fi
+                  COUNT="$(echo "$MISSING" | wc -w | tr -d ' ')"
+                  {
+                    echo "missing_count=$COUNT"
+                    echo "missing_langs=$LANGS"
+                    echo "produced=$((TOTAL - COUNT))"
+                  } >> "$GITHUB_OUTPUT"
+                  if [ "$COUNT" -eq 0 ]; then
+                    echo "✅ 译文完整：$TOTAL 个 (文件 × 语言) 全部产出。"
+                    exit 0
+                  fi
+                  echo "::warning::译文缺失 $COUNT 项（缺失语言: $LANGS）。"
+                  echo "缺失清单:$MISSING"
+                  echo "暂存目录实际内容："
+                  find "$STAGE" -type f -printf '  %p (%s bytes)\n' | head -80 || true
+                  {
+                    echo "### ⚠️ 缺失译文"
+                    echo ""
+                    echo "$COUNT 项；语言：$LANGS"
+                    echo ""
+                    echo '```'
+                    echo "$MISSING"
+                    echo '```'
+                  } >> "$GITHUB_STEP_SUMMARY"
+                  if [ "$MODE" = "hard" ]; then
+                    if [ "${ALLOW_PARTIAL_TRANSLATIONS:-true}" = "true" ]; then
+                      echo "::warning::ALLOW_PARTIAL_TRANSLATIONS=true：发布已产出的 $((TOTAL - COUNT)) 篇译文；"
+                      echo "::warning::缺失语言会在下次 EN 变更时自动补翻（缓存里没有伪译文）。"
+                      exit 0
+                    fi
+                    echo "::error::干净重试后仍有译文缺失，终止发布。"
+                    echo "::error::如需「有几个语言成功就先发几个」，把 env.ALLOW_PARTIAL_TRANSLATIONS 设为 true。"
+                    exit 1
+                  fi
+                  exit 0
+                  VERIFY_EOF
+                  chmod +x "$VERIFIER"
+                  echo "校验脚本已写入 $VERIFIER"
+
             # 翻译：复用现成 Action（remark AST 解析，代码块/链接天然保留）。
             # 固定到 v0.2.11，避免浮动 @v0 随上游变更引入回归。
             - name: Translate chunk ${{ matrix.i }}
@@ -472,6 +565,13 @@ jobs:
                       严格保留源文档的 Markdown 结构、frontmatter 字段名与 HTML/组件标签，
                       不得改写链接目标、不得增删列表项或重新排版。
                       必须输出完整译文，不得输出摘要、省略或占位文本。
+                      MANDATORY OUTPUT FORMAT (fixes 0.4.2 "No translations found"):
+                      The input wraps each node in markers like ┌T001┐...└T001┘. These are INPUT markers only.
+                      Respond with ONE fenced code region per HASH, using three backticks and the HASH as the
+                      language label, e.g. ```T001 followed by the translated text and a closing ``` fence.
+                      NEVER echo ┌ / └ / ┐ / ┘ characters or the input markers back; they are not valid output.
+                      Never put all translations inside a single code block, and never wrap the whole response.
+                      Each HASH must appear exactly once; without fenced code regions the result is discarded.
                   glossary_file: i18n/glossary.md
 
             # (修复 0.3.5) Docker action 以 root 写文件，宿主机 runner（非 root）后续读/写会
@@ -485,54 +585,109 @@ jobs:
                     [ -e "$d" ] && sudo chown -R "$(id -u):$(id -g)" "$d" 2>/dev/null || true
                   done
 
-            # (修复 0.3.5) 显式失败闸门：pelikhan 的 "genaiscript: cancelled" 退出码为 0，
-            # 0.3.4 会出现"workflow 全绿、但一篇译文都没有"的静默失败。
+            # (修复 0.3.5 + 0.4.2) 第一遍是非致命校验：只列出缺失的「语言」，
+            # 交给下面的干净重试。0.4.1 在这里直接 exit 1，结果 2 个语言
+            # 解析失败就把另外 13 个已成功语言的译文一起丢弃。
             - name: Verify translations were produced
               id: verify
               env:
                   TARGET_LANGS: ${{ env.TARGET_LANGS }}
                   STAGING_DIR: ${{ env.STAGING_DIR }}
+              run: bash "$RUNNER_TEMP/i18n-verify.sh" soft
+
+            # (修复 0.4.2) 上游 runPrompt(cache:true) 会把「模型原样抄回
+            # ┌T000┐ 标记」的坏响应缓存住，内部 5 次重试全是 total:0 的回放，
+            # 永远自愈不了。必须清缓存 + 换一次全新的 action 进程。
+            - name: Prepare clean retry for missing languages
+              if: steps.verify.outputs.missing_langs != ''
+              env:
+                  MISSING_LANGS: ${{ steps.verify.outputs.missing_langs }}
+                  TRANSLATIONS_DIR: ${{ env.TRANSLATIONS_DIR }}
+                  STAGING_DIR: ${{ env.STAGING_DIR }}
               run: |
                   set -euo pipefail
-                  STAGE="$STAGING_DIR"
-                  [ -f "$STAGE/.sources" ] || { echo "::error::缺少源文件清单 $STAGE/.sources"; exit 1; }
-                  MISSING=""
-                  TOTAL=0
-                  while IFS= read -r src; do
-                    [ -z "$src" ] && continue
-                    base="${src%.md}"
-                    for L in $(echo "$TARGET_LANGS" | tr ',' ' '); do
-                      TOTAL=$((TOTAL + 1))
-                      # pelikhan 用 lang: to.toLowerCase() 渲染 filename_template，
-                      # 因此 zh-CN 的译文文件名是 {slug}.zh-cn.md（全小写）。
-                      LL="$(echo "$L" | tr '[:upper:]' '[:lower:]')"
-                      [ -s "$base.$LL.md" ] || MISSING="$MISSING $src→$L"
-                    done
-                  done < "$STAGE/.sources"
-                  if [ "$TOTAL" -eq 0 ]; then
-                    echo "::error::源文件清单为空，翻译任务未执行。"
-                    exit 1
-                  fi
-                  if [ -n "$MISSING" ]; then
-                    echo "::error::译文缺失 $(echo "$MISSING" | wc -w) 项，翻译引擎未产出完整结果。"
-                    echo "缺失清单:$MISSING"
-                    echo "暂存目录实际内容："
-                    find "$STAGE" -type f -printf '  %p (%s bytes)\n' | head -80 || true
-                    echo "排查顺序："
-                    echo "  1) Preflight translation credentials：Key 是否存在、GET /models 是否 200、TRANSLATION_MODEL 是否在可用模型列表；"
-                    echo "  2) Translate chunk 日志若出现 'Error connecting to translation model github:openai/gpt-4o'，"
-                    echo "     说明 DeepSeek 凭证未被 GenAIScript 读取（0.4.0 及更早模板的通病）：升级包并重跑 init:i18n；"
-                    echo "  3) DEEPSEEK_API_KEY 是否有效 / 余额是否充足、模型名与端点是否匹配；"
-                    echo "  4) 是否出现 'No files or not matching languages selected.'（源文件路径 / 暂存目录问题）。"
-                    exit 1
-                  fi
-                  echo "✅ 译文完整：$TOTAL 个 (文件 × 语言) 全部产出。"
-                  echo "produced=$TOTAL" >> "$GITHUB_OUTPUT"
+                  echo "::notice::缺失语言: $MISSING_LANGS，清理坏缓存后干净重试一次。"
+                  sudo rm -rf .genaiscript 2>/dev/null || rm -rf .genaiscript 2>/dev/null || true
+                  for L in $(echo "$MISSING_LANGS" | tr ',' ' '); do
+                    LL="$(echo "$L" | tr '[:upper:]' '[:lower:]')"
+                    # 该语言的增量缓存可能只有空对象或半截结果，删掉强制整篇重翻。
+                    rm -f "$TRANSLATIONS_DIR/$LL.json"
+                    # 清掉 0 字节占位译文，避免 -s 判断混淆。
+                    find "$STAGING_DIR" -type f -name "*.$LL.md" ! -size +0c -delete 2>/dev/null || true
+                  done
+
+            - name: Retry missing languages once
+              if: steps.verify.outputs.missing_langs != ''
+              uses: pelikhan/action-continuous-translation@v0.2.11
+              env:
+                  OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+                  OPENAI_API_BASE: ${{ env.OPENAI_API_BASE }}
+                  GENAISCRIPT_DEFAULT_MODEL: "openai:${{ env.TRANSLATION_MODEL }}"
+                  GENAISCRIPT_MODEL_TRANSLATION: "openai:${{ env.TRANSLATION_MODEL }}"
+                  GENAISCRIPT_MODEL_VALIDATION: "openai:${{ env.TRANSLATION_MODEL }}"
+              with:
+                  source: en
+                  lang: ${{ steps.verify.outputs.missing_langs }}
+                  files: ${{ steps.stage.outputs.stage_files }}
+                  filename_template: "{{dirname}}/{{basename}}.{{lang}}{{extname}}"
+                  translations_dir: ${{ env.TRANSLATIONS_DIR }}
+                  openai_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
+                  openai_api_base: ${{ env.OPENAI_API_BASE }}
+                  model_alias: "translation: openai:${{ env.TRANSLATION_MODEL }}"
+                  instructions: |
+                      仅翻译正文与可翻译字段；严禁翻译 slug、媒体路径、外链、代码块与行内代码。
+                      严格保留 Markdown 结构、frontmatter 字段名与 HTML/组件标签。
+                      必须输出完整译文，不得输出摘要、省略或占位文本。
+                      MANDATORY OUTPUT FORMAT (clean retry, fixes "No translations found"):
+                      The input wraps each node in ┌T001┐...└T001┘ markers; those are INPUT only.
+                      Reply with ONE fenced code region per HASH: three backticks, the HASH as the
+                      language label (```T001), the translated text, then a closing ``` fence.
+                      NEVER echo ┌ / └ / ┐ / ┘ or the input markers, never merge all HASHes into
+                      one code block, and never wrap the whole response. This is a fresh retry:
+                      do not reuse any earlier response format.
+                  glossary_file: i18n/glossary.md
+
+            - name: Reclaim ownership after retry
+              if: always() && steps.verify.outputs.missing_langs != ''
+              run: |
+                  for d in "$STAGING_DIR" "$TRANSLATIONS_DIR" .genaiscript; do
+                    [ -e "$d" ] && sudo chown -R "$(id -u):$(id -g)" "$d" 2>/dev/null || true
+                  done
+
+            - name: Verify translations after retry
+              if: steps.verify.outputs.missing_langs != ''
+              env:
+                  TARGET_LANGS: ${{ env.TARGET_LANGS }}
+                  STAGING_DIR: ${{ env.STAGING_DIR }}
+                  ALLOW_PARTIAL_TRANSLATIONS: ${{ env.ALLOW_PARTIAL_TRANSLATIONS }}
+              run: bash "$RUNNER_TEMP/i18n-verify.sh" hard
 
             # 路径适配：把暂存译文移回 Sveltia 的 multiple_folders 布局
             # {content_root}/{collection}/{lang}/{slug}.md
             - name: Remap to Sveltia layout
               run: bash scripts/remap-translations.sh "$CONTENT_ROOT" "$STAGING_DIR"
+
+            # (修复 0.4.2) 明确校验落盘位置：译文必须放在对应语言文件夹里，
+            # 例如 src/content/blog/fr/<slug>.md，而不是 .../blog/<slug>.fr.md。
+            - name: Verify destination layout
+              run: |
+                  set -euo pipefail
+                  git add -A "$CONTENT_ROOT"
+                  BAD=""
+                  for f in $(git diff --cached --name-only "$CONTENT_ROOT"); do
+                    [ -f "$f" ] || continue
+                    folder="$(basename "$(dirname "$f")")"
+                    ok=0
+                    for L in $(echo "$TARGET_LANGS" | tr ',' ' '); do
+                      [ "$folder" = "$L" ] && { ok=1; break; }
+                    done
+                    [ "$ok" -eq 1 ] || BAD="$BAD $f"
+                  done
+                  if [ -n "$BAD" ]; then
+                    echo "::error::以下译文没有落在 <content_root>/<collection>/<lang>/<slug>.md：$BAD"
+                    exit 1
+                  fi
+                  echo "✅ 译文均落在对应语言目录（例：$CONTENT_ROOT/blog/fr/<slug>.md）。"
 
             # 自检 + 提交到共享 batch 分支（带 --force-with-lease 与重试，防并发/手推冲突）
             - name: Self-check & commit to batch branch
@@ -608,7 +763,7 @@ jobs:
               if: needs.translate.result != 'success'
               run: |
                   echo "::error::翻译分片未成功完成（translate result: ${{ needs.translate.result }}），没有译文被发布。"
-                  echo "请打开 translate 分片的日志，重点看 Verify translations were produced 与 Remap 步骤。"
+                  echo "请打开 translate 分片的日志，重点看 Verify translations were produced、Retry missing languages once 与 Verify destination layout 步骤。"
                   exit 1
 
             # 发布方式：commit（默认）直接合并到 main 并推送
@@ -666,8 +821,10 @@ jobs:
                         '   升级 astro-sveltia-pages 并重跑 pnpm exec astro-sveltia-pages init:i18n，提交三份生成文件。',
                         '3. detect 的 Verify i18n template version：模板版本是否与 lockfile / package.json 一致；',
                         '   不一致说明升级依赖后没重跑 init:i18n，旧 workflow 会静默产出 0 篇译文。',
-                        '4. Verify translations were produced 的缺失清单（文件→语言）、DEEPSEEK_API_KEY 余额、',
-                        '   以及是否有 No files or not matching languages selected.（源文件路径/暂存目录问题）。'
+                        '4. Verify translations were produced 的缺失清单（文件→语言）与 Retry missing languages once；',
+                        '   若日志里出现 ┌T000┐ 被原样抄回 / "No translations found"，说明模型没按代码围栏格式输出（0.4.2 已加强 instructions 并在清缓存后重试）。',
+                        '5. Verify destination layout：译文必须位于 <content_root>/<collection>/<lang>/<slug>.md。',
+                        '6. DEEPSEEK_API_KEY 余额、No files or not matching languages selected.（源文件路径/暂存目录问题）。'
                       ].join('\n');
                       await github.rest.issues.create({
                         owner: context.repo.owner,

@@ -199,6 +199,53 @@ describe("i18n workflow 0.3.5 regression guards", () => {
     });
 });
 
+// 0.4.2: DeepSeek occasionally echoed the upstream ┌T000┐ input markers instead
+// of returning ```T000 fenced code regions. The engine parses only fences, saw
+// "translations: 0", then replayed the same cached bad response 4 times. 0.4.1
+// failed the whole job on the 2 missing languages and threw away the other 13.
+describe("i18n workflow 0.4.2 regression guards", () => {
+    const workflow = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
+
+    it("explicitly forbids echoing the box markers back", () => {
+        expect(workflow).toContain("MANDATORY OUTPUT FORMAT");
+        expect(workflow).toContain("NEVER echo");
+        expect(workflow).toContain("┌T001┐");
+        expect(workflow).toContain("fenced code region per HASH");
+    });
+
+    it("verifies softly first, then retries only the missing languages", () => {
+        expect(workflow).toContain("Install translation verifier");
+        expect(workflow).toContain('i18n-verify.sh" soft');
+        expect(workflow).toContain("Prepare clean retry for missing languages");
+        expect(workflow).toContain("Retry missing languages once");
+        expect(workflow).toContain("lang: ${{ steps.verify.outputs.missing_langs }}");
+        expect(workflow).toContain('i18n-verify.sh" hard');
+        // The bad response must not be replayed from the prompt cache.
+        expect(workflow).toContain("rm -rf .genaiscript");
+        expect(workflow).toContain('rm -f "$TRANSLATIONS_DIR/$LL.json"');
+        // Retry must be credentialed exactly like the first pass.
+        expect(workflow).toContain("Reclaim ownership after retry");
+    });
+
+    it("never throws away the successful languages on one flaky language", () => {
+        expect(workflow).toContain('ALLOW_PARTIAL_TRANSLATIONS: "true"');
+        expect(workflow).toContain("ALLOW_PARTIAL_TRANSLATIONS=true");
+        expect(workflow).toContain("GITHUB_STEP_SUMMARY");
+        expect(workflow).not.toContain(
+            '译文缺失 $(echo "$MISSING" | wc -w) 项，翻译引擎未产出完整结果。',
+        );
+    });
+
+    it("asserts translations land in <collection>/<lang>/<slug>.md", () => {
+        expect(workflow).toContain("Verify destination layout");
+        expect(workflow).toContain('basename "$(dirname "$f")"');
+        expect(workflow).toContain("$CONTENT_ROOT/blog/fr/<slug>.md");
+        const remap = readFileSync(I18N_TEMPLATES.remap, "utf-8");
+        expect(remap).toContain('basename "$dest_dir"');
+        expect(remap).toContain("src/content/blog/fr/<slug>.md");
+    });
+});
+
 // 0.3.6 fixes the "upgraded the package, still running the 0.3.4 workflow"
 // failure: the version check has to live in CI, not only in local commands.
 describe("i18n workflow 0.3.6 regression guards", () => {

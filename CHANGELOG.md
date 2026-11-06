@@ -10,6 +10,56 @@ section below.
 
 ---
 
+## 0.4.2
+
+### Fixed
+
+- **A flaky "0 translations for a couple of locales" failure discarded the
+  whole batch.** With the 0.4.1 credential fix working, a real nextcharm run
+  produced 13 of 15 locales successfully; `de` and `pl` failed, `publish`
+  reported `2 missing translations`, and all 13 finished translations were
+  thrown away too. Root cause is upstream
+  `pelikhan/action-continuous-translation@v0.2.11`: it wraps each node in
+  `┌T000┐…└T000┘` markers and requires one ` ```T000 … ``` ` fenced code region
+  per HASH. DeepSeek occasionally echoes those input markers back instead
+  (the German / Polish logs contain only `┌T000┐`), and the engine parses
+  translations exclusively from `fences` → `translations: 0` /
+  `No translations found`. Its 5 built-in retries then replay the same cached
+  bad response (`runPrompt({ cache: true })`; `usage.jsonl` shows four
+  `total: 0` entries), so it can never recover by itself.
+- `instructions` now state the output format as mandatory: one ` ```Tnnn `
+  fenced region per HASH, never echo `┌` / `└` / `┐` / `┘`, never merge all
+  HASHes into one code block, never wrap the whole response.
+- `Verify translations were produced` is now two-phase: a **non-fatal** first
+  pass emits the missing locale list; `Prepare clean retry for missing
+languages` removes the `.genaiscript` response cache and the affected
+  `<lang>.json` caches, then `Retry missing languages once` re-runs the action
+  for those locales only (fresh process + fresh prompt hash, not a replay).
+  A hard pass afterwards closes the gate. The verifier lives in
+  `$RUNNER_TEMP`, so no fourth generated file is added.
+- New `env.ALLOW_PARTIAL_TRANSLATIONS` (default `"true"`): if a locale is still
+  missing after the retry, publish the successful locales with a warning
+  instead of losing all of them because of one locale. Set `"false"` for strict
+  all-or-nothing behaviour; both modes print the missing list and write it to
+  the Step Summary.
+- New **`Verify destination layout`**: after remap, every staged content file
+  must live in `<content_root>/<collection>/<lang>/<slug>.md` (e.g.
+  `src/content/blog/fr/<slug>.md`). `remap-translations.sh` also asserts the
+  destination directory name equals the target locale before writing, ruling
+  out `.../blog/<slug>.fr.md`.
+- The failure issue now mentions the `┌T000┐` echo / `No translations found`
+  signature and the destination-layout check.
+
+### Migration
+
+- Re-run `pnpm exec astro-sveltia-pages init:i18n` in every consumer repo and
+  commit the three regenerated files (template `0.4.2`). No Secret, CMS config
+  or frontmatter changes are needed.
+- The `<lang>.json` files in the `translation-logs-*` artifact are translation
+  caches (source fragment → translation), useful for completeness and
+  phrase-level quality checks; `{}` means zero strings for that locale. The
+  final markdown files live in the per-locale folders, not in the artifact.
+
 ## 0.4.1
 
 ### Fixed

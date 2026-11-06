@@ -135,6 +135,12 @@ async function buildI18nTemplates() {
             "OPENAI_API_BASE:",
             "GENAISCRIPT_MODEL_TRANSLATION",
             "Preflight translation credentials",
+            // 0.4.2: a single language whose model echoes ┌T000┐ markers must
+            // not discard every other language's finished translation.
+            "MANDATORY OUTPUT FORMAT",
+            "Retry missing languages once",
+            "Verify destination layout",
+            "ALLOW_PARTIAL_TRANSLATIONS",
             "__TARGET_LANGS__",
             "__CONFIG_FILE__",
         ],
@@ -186,6 +192,18 @@ async function buildI18nTemplates() {
         ],
         ["Reclaim ownership of Docker-generated files", "Docker root permission fix"],
         ["Verify translations were produced", "zero-translation failure gate"],
+        [
+            "Install translation verifier",
+            "shared soft/hard verification script (0.4.2)",
+        ],
+        [
+            "Retry missing languages once",
+            "clean-cache retry for flaky per-language output format (0.4.2)",
+        ],
+        [
+            "Verify destination layout",
+            "translations must land in <collection>/<lang>/ (0.4.2)",
+        ],
         ["Fail when translation did not succeed", "publish-side failure gate"],
         ["filename_template:", "explicit translation filename template"],
         [
@@ -218,6 +236,7 @@ async function buildI18nTemplates() {
     const remap = await readFile(join(srcDir, "remap-translations.sh"), "utf-8");
     const remapInvariants = [
         ["canonical_lang", "restore Sveltia locale casing in output paths"],
+        ['basename "$dest_dir"', "0.4.2 guard: destination is a language folder"],
         ["lower()", "case-insensitive language matching"],
         ['mv -f "$f"', "plain mv instead of git mv"],
     ];

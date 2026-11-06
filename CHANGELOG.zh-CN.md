@@ -8,6 +8,45 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.4.2
+
+### 修复
+
+- **偶发「某几个语言 0 篇译文」会拖垮整次发布。** 0.4.1 的凭证修复生效后，
+  nextcharm 实测 15 个语言里 13 个成功、`de` / `pl` 失败，publish 报
+  `译文缺失 2 项`，结果 13 篇已完成的译文也全部没有发布。
+  根因在上游 `pelikhan/action-continuous-translation@v0.2.11`：它把待译节点包成
+  `┌T000┐…└T000┘` 标记，要求模型用 ` ```T000 … ``` ` 代码围栏逐条返回；
+  DeepSeek 偶尔把输入标记原样抄回（德语 / 波兰语日志里全是 `┌T000┐`），
+  上游只从代码围栏解析译文 → `translations: 0` / `No translations found`。
+  它内部的 5 次重试又命中 `runPrompt(cache:true)` 的同一份坏响应
+  （`usage.jsonl` 里 4 条 `total:0`），永远无法自愈。
+- `instructions` 增加强制输出格式约束：每个 HASH 单独一个 ` ```Tnnn ` 代码围栏，
+  禁止回显 `┌` / `└` / `┐` / `┘` 标记，禁止把所有译文塞进一个代码块，
+  禁止把整个响应包进代码块。
+- `Verify translations were produced` 改为两段式：先做**非致命**校验并输出
+  缺失语言清单；`Prepare clean retry for missing languages` 清掉 `.genaiscript`
+  响应缓存与对应 `<lang>.json` 增量缓存，再用 `Retry missing languages once`
+  只重跑这些语言（新进程 + 新 prompt hash，不再是坏响应回放）；重试后用
+  hard 模式收口。校验脚本写在 `$RUNNER_TEMP`，不新增需要提交的模板文件。
+- 新增 `env.ALLOW_PARTIAL_TRANSLATIONS`（默认 `"true"`）：重试后仍缺失时告警并
+  发布已成功的语言，不再因为 1 个语言失败丢掉其余 14 个；设 `"false"` 恢复
+  严格模式。两种模式都会打印缺失清单并写入 Step Summary。
+- 新增 **`Verify destination layout`**：remap 后逐条校验 git 暂存区里的译文都位于
+  `<content_root>/<collection>/<lang>/<slug>.md`（例如
+  `src/content/blog/fr/<slug>.md`）；`remap-translations.sh` 也在写入前断言
+  目标目录名就是目标语言码。彻底排除「译文被写成 `.../blog/<slug>.fr.md`」。
+- 失败 issue 的排查顺序补充 `┌T000┐` 回显 / `No translations found` 特征与
+  `Verify destination layout`。
+
+### 迁移
+
+- 每个消费方仓库重跑 `pnpm exec astro-sveltia-pages init:i18n` 并提交重新生成的
+  三份文件（模板版本 `0.4.2`）。Secret、CMS 配置、frontmatter 都不用改。
+- `translation-logs-*` 产物里的 `<lang>.json` 是翻译缓存（源片段 → 译文），
+  可用来核对完成度与逐句质量；`{}` 表示该语言本次 0 篇。最终 md 仍存放在
+  对应语言目录，不在该产物里。
+
 ## 0.4.1
 
 ### 修复

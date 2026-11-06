@@ -440,6 +440,17 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
       A **Preflight translation credentials** step validates the key and prints
       the provider's available model ids before any translation starts.
 
+        **Since 0.4.2**: verification is non-fatal on the first pass. If a locale
+        produced nothing because the model did not honour the ` ```Tnnn ` fenced
+        output format, the workflow clears the poisoned response cache and retries
+        that locale once in a fresh process. If it is still missing,
+        `ALLOW_PARTIAL_TRANSLATIONS` (default `"true"`) publishes the successful
+        locales with a warning instead of discarding all of them; set it to
+        `"false"` for strict all-or-nothing behaviour. **Verify destination
+        layout** then asserts every translation landed in
+        `<content-root>/<collection>/<lang>/<slug>.md` (e.g.
+        `src/content/blog/fr/<slug>.md`).
+
 3.  Add an **auto-translate toggle** to every CMS collection's `fields` (and to
     `_template.md`, so new entries default to off):
 

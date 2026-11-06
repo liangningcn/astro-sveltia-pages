@@ -12,8 +12,9 @@ dist
 /mkdir
 /set
 
-# CI 运行日志
+# CI 运行日志 / 下载的翻译产物
 logs_*/
+translation-logs-*/
 
 # 工具缓存
 .workbuddy/
