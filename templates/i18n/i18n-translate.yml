@@ -6,8 +6,9 @@
 #
 # ⚠️ 升级 astro-sveltia-pages 后必须重新运行 `pnpm exec astro-sveltia-pages init:i18n`
 #    （CLI 会自动检测旧版模板并升级，同时备份原文件）。只升级依赖不会更新本文件。
-#    继续用旧 workflow 会导致翻译静默失败，且极难排查 —— 排查前先核对下面
-#    "Report i18n template version" 步骤打印的版本是否与已安装包版本一致。
+#    0.3.6 起 detect 阶段会在 CI 内把本模板版本与 lockfile / package.json 中
+#    实际安装的包版本比对，不一致立即失败并给出修复命令；不再只依赖本地
+#    `astro dev` / `astro build` 的告警（CMS 直接 push 的用户根本看不到它）。
 #
 # 方案: 复用 pelikhan/action-continuous-translation@v0.2.11 作为翻译引擎（DeepSeek 驱动）。
 #
@@ -94,6 +95,9 @@ env:
     # 语言单一来源校验：填 Sveltia 配置文件路径，工作流会校验其 locales 与 TARGET_LANGS 一致；
     # 留空则跳过校验。配置才是"唯一事实来源"，改语言只改这里。
     CONFIG_FILE: "__CONFIG_FILE__"
+    # 生成本文件的模板版本（由 init:i18n 填入）。detect 阶段会与 lockfile /
+    # package.json 里实际安装的包版本比对，不一致即终止，避免继续跑旧快照。
+    TEMPLATE_VERSION: "__TEMPLATE_VERSION__"
     # 暂存目录：必须是【非隐藏】目录且路径中不含两位语言码目录段。
     # pelikhan/action-continuous-translation 会过滤含 /xx/ 语言目录的文件，
     # 而 GenAIScript 的 glob 默认忽略以点开头的隐藏目录（0.3.4 的隐藏暂存目录因此失效）。
@@ -115,13 +119,71 @@ jobs:
               with:
                   fetch-depth: 0 # 需要 before/after 两个 SHA 做增量差异
 
-            # 让每次运行的日志都能一眼看出"跑的是哪个版本的模板"。
-            # 排查翻译失败时，先确认这里的版本与已安装的包版本一致；
-            # 不一致就说明升级包之后没有重跑 init:i18n。
-            - name: Report i18n template version
+            # (修复 0.3.6) 版本自检必须发生在 CI 里。0.3.5 只在本地 astro dev/build
+            # 和 `init:i18n --check` 提示过期，但 Sveltia CMS 直接 push 内容时用户
+            # 可能几周都不跑本地构建：包升到 0.3.5、仓库里提交的 workflow 仍是
+            # 0.3.4 快照，pelikhan 报 "No files or not matching languages selected."、
+            # remap 移动 0 个文件、mkdir .genaiscript/cache 权限失败，而失败 issue
+            # 只让人去查 API Key，根因完全不可见。
+            # 这里把 lockfile / 已安装包 / package.json 里的版本与模板版本比对，
+            # 不一致立即失败并给出可复制的修复命令，不再浪费一次翻译运行。
+            - name: Verify i18n template version
               run: |
-                  echo "::notice::i18n 模板版本 v__TEMPLATE_VERSION__（由 init:i18n 生成）。"
-                  echo "::notice::升级 astro-sveltia-pages 后必须重跑 pnpm exec astro-sveltia-pages init:i18n，否则本文件仍是旧版。"
+                  node <<'NODE'
+                  const fs = require('fs');
+                  const stamped = (process.env.TEMPLATE_VERSION || '').trim();
+                  if (!stamped) { console.log('::warning::未找到 TEMPLATE_VERSION，跳过模板版本比对。'); process.exit(0); }
+                  console.log('::notice::i18n 模板版本 v' + stamped + '（由 init:i18n 生成）。');
+
+                  // 优先级：lockfile 实际解析的版本 > 已安装包 > package.json 声明。
+                  let installed = null, source = null;
+                  for (const f of ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock']) {
+                    if (!fs.existsSync(f)) continue;
+                    const s = fs.readFileSync(f, 'utf8');
+                    const m = s.match(/astro-sveltia-pages@(\d+\.\d+\.\d+(?:-[\w.]+)?)/)
+                      || s.match(/astro-sveltia-pages:\s*\n\s*specifier:[^\n]*\n\s*version:\s*(\d+\.\d+\.\d+(?:-[\w.]+)?)/)
+                      || s.match(/"node_modules\/astro-sveltia-pages"[\s\S]{0,300}?"version"\s*:\s*"(\d+\.\d+\.\d+(?:-[\w.]+)?)"/);
+                    if (m) { installed = m[1]; source = f; break; }
+                  }
+                  if (!installed) {
+                    try {
+                      const p = JSON.parse(fs.readFileSync('node_modules/astro-sveltia-pages/package.json', 'utf8'));
+                      if (p.version) { installed = p.version; source = 'node_modules/astro-sveltia-pages/package.json'; }
+                    } catch (e) { /* dependencies not installed in this job */ }
+                  }
+                  let declared = null;
+                  try {
+                    const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+                    declared = (pkg.dependencies || {})['astro-sveltia-pages'] || (pkg.devDependencies || {})['astro-sveltia-pages'] || null;
+                  } catch (e) { /* no package.json (e.g. submodule checkout) */ }
+                  if (!installed && declared) {
+                    const m = String(declared).match(/\d+\.\d+\.\d+(?:-[\w.]+)?/);
+                    if (m) { installed = m[0]; source = 'package.json (声明值)'; }
+                  }
+                  if (!installed) {
+                    console.log('::warning::无法解析 astro-sveltia-pages 版本（catalog:/workspace:/未声明），跳过比对。');
+                    process.exit(0);
+                  }
+                  if (installed === stamped) {
+                    console.log('✅ 模板与依赖版本一致：' + installed + '（来源 ' + source + '）。');
+                    process.exit(0);
+                  }
+                  // 只拿到 ^0.3.0 这类范围声明时放宽到 major.minor，避免误报。
+                  const majorMinor = v => v.split('.').slice(0, 2).join('.');
+                  if (source.startsWith('package.json') && /^[~^]/.test(String(declared)) && majorMinor(installed) === majorMinor(stamped)) {
+                    console.log('::warning::只能读到版本范围 ' + declared + '，无法精确判定；若翻译异常请重跑 init:i18n。');
+                    process.exit(0);
+                  }
+                  console.error('::error::i18n 工作流模板与已安装的 astro-sveltia-pages 版本不一致，已提前终止本次运行。');
+                  console.error('  工作流模板 : v' + stamped);
+                  console.error('  已安装版本 : ' + installed + '（来源 ' + source + '）');
+                  console.error('  这三份文件是提交进仓库的生成快照，升级依赖不会替换它们。');
+                  console.error('  继续用旧 workflow 会导致 pelikhan 报 "No files or not matching languages selected."、');
+                  console.error('  remap 移动 0 个文件、随后 mkdir .genaiscript/cache 权限失败，最终零译文。');
+                  console.error('  修复    : pnpm exec astro-sveltia-pages init:i18n（并提交更新后的三个文件）');
+                  console.error('  CI 拦截 : pnpm exec astro-sveltia-pages init:i18n --check');
+                  process.exit(1);
+                  NODE
 
             # 语言单一来源校验：Sveltia 配置的 locales 必须与 TARGET_LANGS 完全一致，
             # 否则直接失败并给出两边差异，防止"只改一边导致静默失效"。
@@ -247,9 +309,13 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: i18n-translations
-                  key: i18n-${{ runner.os }}-${{ github.run_id }}-${{ matrix.i }}
+                  # (修复 0.3.6) 分片号必须同时出现在 key 与 restore-keys 前缀里。
+                  # 旧写法所有分片共享同一个 restore 前缀：并行分片会各自恢复
+                  # 同一份旧缓存、再各自保存只含本分片记录的缓存，下一次运行
+                  # 只能恢复其中一份，其余分片的增量状态丢失 → 重复翻译。
+                  key: i18n-${{ runner.os }}-${{ matrix.i }}-${{ github.run_id }}
                   restore-keys: |
-                      i18n-${{ runner.os }}-
+                      i18n-${{ runner.os }}-${{ matrix.i }}-
 
             # 暂存英文源到"无语言目录、且非隐藏"的扁平路径后再翻译。
             # 原因(pelikhan 兼容性 bug)：pelikhan@v0.2.11 的 translator.genai.mts 里有
@@ -499,13 +565,17 @@ jobs:
                       const body = [
                         '翻译工作流执行失败（translate: ' + result + '）。',
                         '',
+                        'i18n 模板版本: v' + (process.env.TEMPLATE_VERSION || '未知（旧版 workflow，无版本标记）'),
                         '运行链接: ' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId,
                         '',
                         '排查顺序：',
-                        '1. translate 分片日志里的 Verify translations were produced（缺失清单会列出 文件→语言）；',
-                        '2. DEEPSEEK_API_KEY 是否有效、余额是否充足；',
-                        '3. 是否出现 No files or not matching languages selected.（源文件路径/暂存目录问题）；',
-                        '4. 若从旧版升级，确认已重新运行 pnpm exec astro-sveltia-pages init:i18n 更新工作流。'
+                        '1. detect 的 Verify i18n template version：模板版本是否与 lockfile / package.json 一致；',
+                        '   不一致说明升级依赖后没重跑 init:i18n —— 旧 workflow 会静默产出 0 篇译文，',
+                        '   典型症状正是 "No files or not matching languages selected." + "mkdir: Permission denied"。',
+                        '   修复：pnpm exec astro-sveltia-pages init:i18n，并提交更新后的三个文件。',
+                        '2. translate 分片日志里的 Verify translations were produced（缺失清单会列出 文件→语言）；',
+                        '3. DEEPSEEK_API_KEY 是否有效、余额是否充足；',
+                        '4. 是否出现 No files or not matching languages selected.（源文件路径/暂存目录问题）。'
                       ].join('\n');
                       await github.rest.issues.create({
                         owner: context.repo.owner,

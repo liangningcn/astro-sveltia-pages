@@ -151,8 +151,9 @@ describe("i18n workflow 0.3.5 regression guards", () => {
     });
 
     it("self-reports the template version in every Actions run", () => {
-        expect(workflow).toContain("Report i18n template version");
+        expect(workflow).toContain("Verify i18n template version");
         expect(workflow).toContain("v__TEMPLATE_VERSION__");
+        expect(workflow).toContain('TEMPLATE_VERSION: "__TEMPLATE_VERSION__"');
     });
 
     it("uses the same pnpm upgrade command in all three generated files", () => {
@@ -162,5 +163,48 @@ describe("i18n workflow 0.3.5 regression guards", () => {
             expect(content).toContain("pnpm exec astro-sveltia-pages init:i18n");
             expect(content).not.toContain("npx ");
         }
+    });
+});
+
+// 0.3.6 fixes the "upgraded the package, still running the 0.3.4 workflow"
+// failure: the version check has to live in CI, not only in local commands.
+describe("i18n workflow 0.3.6 regression guards", () => {
+    const workflow = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
+
+    it("compares the template version against the lockfile during detect", () => {
+        expect(workflow).toContain("Verify i18n template version");
+        expect(workflow).toContain("pnpm-lock.yaml");
+        expect(workflow).toContain("process.env.TEMPLATE_VERSION");
+        expect(workflow).toContain("process.exit(1)");
+    });
+
+    it("gives the exact fix command when the versions diverge", () => {
+        expect(workflow).toContain("已安装的 astro-sveltia-pages 版本不一致");
+        expect(workflow).toContain(
+            "pnpm exec astro-sveltia-pages init:i18n（并提交更新后的三个文件）",
+        );
+    });
+
+    it("names the two symptoms seen in the stale-workflow CI log", () => {
+        expect(workflow).toContain("No files or not matching languages selected.");
+        expect(workflow).toContain("mkdir .genaiscript/cache 权限失败");
+    });
+
+    it("isolates the translation cache per matrix shard", () => {
+        expect(workflow).toContain(
+            "key: i18n-${{ runner.os }}-${{ matrix.i }}-${{ github.run_id }}",
+        );
+        expect(workflow).toContain("i18n-${{ runner.os }}-${{ matrix.i }}-");
+    });
+
+    it("reports the template version in the failure issue", () => {
+        expect(workflow).toContain("i18n 模板版本: v");
+        expect(workflow).toContain("process.env.TEMPLATE_VERSION || ");
+    });
+
+    it("reads the declared-version fallback from the full match", () => {
+        // That regex has no capture group: m[1] used to be undefined, which
+        // silently disabled the whole check for manifests using `^0.3.x`.
+        expect(workflow).toContain("installed = m[0]");
     });
 });

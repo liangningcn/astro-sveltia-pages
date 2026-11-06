@@ -10,6 +10,69 @@ section below.
 
 ---
 
+## 0.3.6
+
+Bug-fix release for the _upgrade detection_ introduced in 0.3.5. A real CI log
+from a consumer repository (`nextcharm`, run `42170827866`, 2026-11-06) showed
+that a site can install 0.3.5 and still run the committed **0.3.4** workflow
+snapshot. The resulting failure was indistinguishable from an API-key problem.
+
+### Diagnosis (from the supplied logs)
+
+- `detect` found 1 English source and produced 1 shard.
+- `translate` passed `src/content/blog/en/<slug>.md` straight to
+  `pelikhan/action-continuous-translation@v0.2.11`. That action filters out any
+  path containing a two-letter locale directory (`/\/[a-z]{2,2}(-[a-zA-Z]{2,3})?\//`),
+  so it logged `No files or not matching languages selected.` and
+  `genaiscript: cancelled` (exit code 0).
+- `remap` moved 0 files, the self-check saw no translation changes and skipped
+  the commit, then the host-side `mkdir -p .genaiscript/cache` failed with
+  `mkdir: Permission denied` because the Docker action created that directory as
+  root. `publish` found no batch branch and opened an issue that only suggested
+  checking `DEEPSEEK_API_KEY`, rate limits and the self-check.
+- None of the 0.3.5 steps were present (no `Verify i18n template version`, no
+  staging, no `Verify translations were produced`, no ownership reclaim, no
+  publish-side failure gate). **Root cause: upgrading the npm dependency does not
+  replace the committed workflow snapshot.** 0.3.5 only detected this on channels
+  the user has to invoke locally (`astro dev` / `astro build`, `init:i18n --check`)
+  — a CMS-driven content push never runs either of them.
+
+### Fixed
+
+- **CI-side stale-template gate.** The generated workflow now carries a
+  `TEMPLATE_VERSION` env value and a `Verify i18n template version` step in
+  `detect`. It resolves the actually installed package version from
+  `pnpm-lock.yaml` / `package-lock.json` / `yarn.lock`, then
+  `node_modules/astro-sveltia-pages/package.json`, then `package.json`, and fails
+  immediately with an `::error::` plus the exact fix command when it does not
+  match the workflow's template stamp. A bare `^0.3.x` range falls back to a
+  non-fatal `major.minor` comparison so it cannot produce false positives.
+- **Actionable failure issue.** The automatic issue now prints the template
+  version and names the two symptoms from the stale-workflow log, so the next
+  failure points at the snapshot rather than at the API credentials.
+- **`init:i18n --check` no longer fails on repositories that never enabled
+  i18n.** `inspectI18nTemplates` reports `outdated: true` when all three files
+  are missing; the build-time check already guards on `status.enabled`, but the
+  CLI gate did not, so it was unusable as a blanket CI check.
+- **Per-shard translation cache.** The `actions/cache` key and `restore-keys`
+  prefix now include `${{ matrix.i }}`. Previously all parallel shards restored
+  the same cache and each saved a cache containing only its own translation
+  records, so the next run recovered just one shard's incremental state and
+  re-translated the rest.
+- `check:templates` and the template tests guard all of the above, plus the
+  0.3.5 invariants.
+
+### Migration (from 0.3.5)
+
+- **Re-run `pnpm exec astro-sveltia-pages init:i18n` in every consumer repository
+  and commit the three regenerated files.** This is mandatory — the log above
+  proves that a dependency bump alone leaves the broken workflow in place. From
+  0.3.6 onwards, forgetting this step fails the next translation run with an
+  explicit version mismatch instead of a silent zero-translation run.
+- No CMS config or secret changes are required.
+
+---
+
 ## 0.3.5
 
 Critical fix release for the shipped i18n translation workflow. 0.3.4 shipped a

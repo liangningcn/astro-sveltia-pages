@@ -263,6 +263,16 @@ export function runInit(args: string[], cwd: string = process.cwd()): void {
 export function checkI18nTemplates(cwd: string = process.cwd()): void {
     const status = inspectI18nTemplates(cwd);
 
+    // 0.3.6: `inspectI18nTemplates` reports outdated=true when all three files
+    // are missing. The build-time check guards this with `status.enabled`, but
+    // the CLI gate did not, so `init:i18n --check` failed in every repository
+    // that never opted into i18n — making it useless as a CI gate for teams
+    // that only enable translation on some sites.
+    if (!status.enabled) {
+        console.log(`${LOG_PREFIX} 未检测到 i18n 生成文件（i18n 未启用），跳过检查。`);
+        return;
+    }
+
     if (status.outdated) {
         fail(
             `i18n 模板不是最新版本（需要 ${I18N_TEMPLATE_VERSION}）。\n${formatI18nUpgradeNotice(status)}`,

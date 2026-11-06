@@ -45,9 +45,12 @@ pnpm add astro-sveltia-pages
 >
 > - Fix now: `pnpm exec astro-sveltia-pages init:i18n` (auto-upgrades, keeps `*.bak`)
 > - CI gate: `pnpm exec astro-sveltia-pages init:i18n --check`
-> - Since 0.3.5 `astro dev` / `astro build` also print a prominent warning when
->   stale templates are detected. Pass `i18nTemplateCheck: "error"` to the
->   integration to fail the build instead, or `"off"` to silence it.
+> - Since 0.3.6 the generated workflow checks its own template version against
+>   the lockfile **inside CI** and fails with the exact fix command if they
+>   diverge. Since 0.3.5 `astro dev` / `astro build` also print a prominent
+>   warning when stale templates are detected. Pass
+>   `i18nTemplateCheck: "error"` to the integration to fail the build instead,
+>   or `"off"` to silence it.
 
 ## Quick Start
 
@@ -407,8 +410,10 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
 > files are generated snapshots committed to your repo — bumping the dependency
 > alone does **not** update them, so the workflow keeps running the old (possibly
 > broken) version. Since 0.3.5 the integration also warns during `astro dev` /
-> `astro build`; add `pnpm exec astro-sveltia-pages init:i18n --check` to your CI
-> to catch stale templates automatically (or set `i18nTemplateCheck: "error"`).
+> `astro build`; since 0.3.6 the workflow itself fails inside CI when its
+> template stamp does not match the installed package. Add
+> `pnpm exec astro-sveltia-pages init:i18n --check` to your CI to catch stale
+> templates at build time (or set `i18nTemplateCheck: "error"`).
 
 2.  Add the GitHub repository secret
     (**Settings → Secrets and variables → Actions → New repository secret**):

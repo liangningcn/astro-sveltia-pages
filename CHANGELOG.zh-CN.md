@@ -8,6 +8,59 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.3.6
+
+修复 0.3.5 引入的「升级检测」缺陷。消费方仓库（`nextcharm`，运行
+`42170827866`，2026-11-06）的真实 CI 日志显示：包已经装到 0.3.5，仓库里提交的
+却仍是 **0.3.4 的 workflow 快照**，失败表现和 API Key 出问题几乎无法区分。
+
+### 日志诊断
+
+- `detect` 检出 1 个英文源、切成 1 片。
+- `translate` 把 `src/content/blog/en/<slug>.md` 直接传给
+  `pelikhan/action-continuous-translation@v0.2.11`。该 Action 会过滤路径中含
+  两位语言码目录的文件（`/\/[a-z]{2,2}(-[a-zA-Z]{2,3})?\//`），于是打印
+  `No files or not matching languages selected.`，`genaiscript: cancelled`
+  但退出码为 0。
+- `remap` 移动 0 个文件，自检发现「本分片无译文变动」跳过提交；紧接着宿主侧
+  `mkdir -p .genaiscript/cache` 因 Docker 以 root 创建了该目录而报
+  `mkdir: Permission denied`，translate job 失败。`publish` 找不到 batch 分支，
+  自动建的 issue 只提示检查 `DEEPSEEK_API_KEY`、限流和译文自检。
+- 日志里没有 0.3.5 模板的任何一个步骤（版本自检、暂存、译文完整性校验、
+  归属权收回、publish 失败闸门）。**根因：升级 npm 依赖不会替换已提交的
+  workflow 快照。** 0.3.5 的过期检测全部依赖用户主动在本地执行
+  （`astro dev` / `astro build`、`init:i18n --check`），而 CMS 直接 push 内容时
+  这两条通道都不会被触发。
+
+### 修复
+
+- **CI 内版本闸门。** 生成的 workflow 新增 `TEMPLATE_VERSION` 环境变量与
+  `Verify i18n template version` 步骤：依次从 `pnpm-lock.yaml` /
+  `package-lock.json` / `yarn.lock`、`node_modules/astro-sveltia-pages/package.json`、
+  `package.json` 解析实际安装的包版本，与模板版本不一致时立即 `::error::`
+  终止并给出可复制的修复命令；只拿到 `^0.3.x` 这类范围声明时退化为
+  `major.minor` 宽松比对并给出警告，避免误报。
+- **失败 issue 可定位。** 自动创建的 issue 现在打印模板版本，并列出上述两个
+  典型症状，把排查方向指向 workflow 快照而不是 API 凭证。
+- **`init:i18n --check` 不再误伤未启用 i18n 的仓库。**
+  `inspectI18nTemplates` 在三份文件全缺失时返回 `outdated: true`，构建期检查
+  已用 `status.enabled` 正确跳过，但 CLI 门禁没有，导致任何没用过 i18n 的仓库
+  加这条 CI 检查都会失败。
+- **翻译缓存按分片隔离。** `actions/cache` 的 key 与 `restore-keys` 前缀都加入
+  `${{ matrix.i }}`。旧写法让并行分片恢复同一份旧缓存、又各自保存只含本分片
+  记录的缓存，下一次运行只能恢复其中一份，其余分片增量状态丢失、被重复翻译。
+- `check:templates` 与模板测试新增上述全部回归守护，0.3.5 的守护项保持。
+
+### 迁移（从 0.3.5）
+
+- **在每个消费方仓库重跑 `pnpm exec astro-sveltia-pages init:i18n` 并提交重新
+  生成的三个文件，这是必须步骤。** 上面的日志证明只升级依赖会继续跑坏掉的
+  workflow。从 0.3.6 起，忘记这一步会在下一次翻译时以「版本不一致」明确失败，
+  不再出现全绿但零译文。
+- CMS 配置与 Secret 无需改动。
+
+---
+
 ## 0.3.5
 
 内置 i18n 翻译工作流的紧急修复版本。0.3.4 虽然加入了绕过上游文件过滤的暂存方案，但从未在真实 CI 中验证过；多项缺陷导致**即使重新生成工作流也可能一篇译文都产不出来**。

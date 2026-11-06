@@ -123,6 +123,7 @@ async function buildI18nTemplates() {
     const required = {
         "i18n-translate.yml": [
             "__TEMPLATE_VERSION__",
+            "TEMPLATE_VERSION:",
             "__CONTENT_ROOT__",
             "__COLLECTION_EN_PATH__",
             "__TARGET_LANGS__",
@@ -175,9 +176,14 @@ async function buildI18nTemplates() {
             "tr '[:upper:]' '[:lower:]'",
             "pelikhan lowercases {{lang}} in output filenames",
         ],
+        ["Verify i18n template version", "CI-side stale-template gate (0.3.6)"],
         [
-            "Report i18n template version",
-            "self-reporting workflow version in Actions logs",
+            'TEMPLATE_VERSION: "__TEMPLATE_VERSION__"',
+            "template version exposed to the CI gate",
+        ],
+        [
+            "i18n-${{ runner.os }}-${{ matrix.i }}-",
+            "per-shard translation cache isolation (0.3.6)",
         ],
         [
             "pnpm exec astro-sveltia-pages init:i18n",

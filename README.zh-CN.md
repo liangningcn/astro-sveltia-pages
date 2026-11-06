@@ -42,6 +42,8 @@ pnpm add astro-sveltia-pages
 >
 > - 立即修复：`pnpm exec astro-sveltia-pages init:i18n`（自动升级旧文件，并保留 `*.bak` 备份）
 > - CI 门禁：`pnpm exec astro-sveltia-pages init:i18n --check`
+> - 自 0.3.6 起，生成的 workflow 会在 **CI 内**把自身模板版本与 lockfile 中实际
+>   安装的包版本比对，不一致立即失败并给出修复命令。
 > - 自 0.3.5 起，`astro dev` / `astro build` 检测到过期模板时会主动打印醒目警告；
 >   给集成传 `i18nTemplateCheck: "error"` 可改为直接让构建失败，传 `"off"` 则关闭。
 
@@ -399,8 +401,9 @@ export const collections = {
 
 > ⚠️ **每次升级 `astro-sveltia-pages` 后都必须重跑 `init:i18n`。** 这三份文件是提交进你仓库的生成快照，
 > 只升级依赖**不会**更新它们，工作流会继续跑旧版（可能是有 bug 的）文件。自 0.3.5 起集成会在
-> `astro dev` / `astro build` 时主动告警；可在 CI 中加入
-> `pnpm exec astro-sveltia-pages init:i18n --check` 自动拦截过期模板（或设置 `i18nTemplateCheck: "error"`）。
+> `astro dev` / `astro build` 时主动告警；自 0.3.6 起 workflow 会在 CI 内自检模板版本，不一致直接失败。
+> 可在 CI 中加入 `pnpm exec astro-sveltia-pages init:i18n --check` 自动拦截过期模板
+> （或设置 `i18nTemplateCheck: "error"`）。
 
 2.  在仓库添加 GitHub Secret（**Settings → Secrets and variables → Actions → New repository secret**）：
 

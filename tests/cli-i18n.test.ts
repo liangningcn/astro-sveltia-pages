@@ -316,8 +316,14 @@ describe("init:i18n — template version stamping & upgrade (0.3.5)", () => {
         }
     });
 
-    it("--check fails when generated files are missing or stale", () => {
+    it("--check fails when i18n is enabled but a generated file is stale", () => {
         const cwd = makeTempDir();
+        const path = workflowPath(cwd);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(
+            path,
+            "<!-- astro-sveltia-pages i18n template v0.3.4 -->\nname: old\n",
+        );
         const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
             code: number,
         ) => {
@@ -327,6 +333,24 @@ describe("init:i18n — template version stamping & upgrade (0.3.5)", () => {
 
         try {
             expect(() => checkI18nTemplates(cwd)).toThrow(/process\.exit\(1\)/);
+        } finally {
+            console_.restore();
+            exitSpy.mockRestore();
+        }
+    });
+
+    it("--check is a no-op when i18n was never initialised (0.3.6)", () => {
+        const cwd = makeTempDir();
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code: number,
+        ) => {
+            throw new Error(`process.exit(${String(code)})`);
+        }) as never);
+        const console_ = captureConsole();
+
+        try {
+            expect(() => checkI18nTemplates(cwd)).not.toThrow();
+            expect(console_.log.join("\n")).toContain("i18n 未启用");
         } finally {
             console_.restore();
             exitSpy.mockRestore();
