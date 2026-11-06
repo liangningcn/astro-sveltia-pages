@@ -246,6 +246,43 @@ describe("i18n workflow 0.4.2 regression guards", () => {
     });
 });
 
+// 0.4.3: `on.push.paths` also matches deleted paths. Deleting an EN post
+// started the workflow, detect kept the now-missing path, and Stage failed with
+// "源文件不存在" -> publish failed and opened a bogus issue.
+describe("i18n workflow 0.4.3 regression guards", () => {
+    const workflow = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
+
+    it("filters deleted/renamed EN paths before reading frontmatter", () => {
+        expect(workflow).toContain(
+            "reasons = { flag: 0, draft: 0, template: 0, deleted: 0 }",
+        );
+        expect(workflow).toContain("} else if (!fs.existsSync(f)) {");
+        expect(workflow).toContain("源文件已删除/重命名");
+        expect(workflow).toContain("已删除/重命名 ' + reasons.deleted");
+        // Without this branch the missing file fell through to `keep.push(f)`.
+        expect(workflow).toContain(
+            "if (reason) console.log('跳过（' + reason + '）: ' + f);",
+        );
+    });
+
+    it("tells the user that deleting EN does not remove published translations", () => {
+        expect(workflow).toContain("其它语言目录下已发布的译文不会被自动删除");
+        expect(workflow).toContain("本次变更仅包含 EN 文件删除");
+    });
+
+    it("handles first pushes and empty repositories without crashing detect", () => {
+        expect(workflow).toContain(
+            "const firstPush = before !== '' && /^0+$/.test(before);",
+        );
+        expect(workflow).toContain('git ls-files | grep -E "${re.source}" || true');
+    });
+
+    it("gives an actionable message if a missing source still reaches Stage", () => {
+        expect(workflow).toContain("可能已在本次 push 中被删除/重命名");
+        expect(workflow).toContain("升级工作流后重跑");
+    });
+});
+
 // 0.3.6 fixes the "upgraded the package, still running the 0.3.4 workflow"
 // failure: the version check has to live in CI, not only in local commands.
 describe("i18n workflow 0.3.6 regression guards", () => {

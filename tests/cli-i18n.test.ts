@@ -7,7 +7,9 @@ import {
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import jsYaml from "js-yaml";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -589,6 +591,136 @@ export default {
 
         const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
         expect(doc.on.push.paths).toEqual(["src/content/**/en/**"]);
+    });
+});
+
+// 0.4.3: GitHub's `on.push.paths` also matches DELETED files. A removed EN
+// post used to reach the staging step, which then failed with "源文件不存在"
+// and made publish open a bogus failure issue. Run the template's real detect
+// script with a mocked filesystem so the guard cannot silently regress.
+describe("init:i18n — deleted EN sources (0.4.3)", () => {
+    const templatePath = fileURLToPath(
+        new URL("../templates/i18n/i18n-translate.yml", import.meta.url),
+    );
+
+    function detectSource(): string {
+        const workflow = readFileSync(templatePath, "utf-8");
+        // The closing NODE delimiter is indented inside the YAML block scalar.
+        const blocks = [
+            ...workflow.matchAll(/node <<'NODE'\r?\n([\s\S]*?)\r?\n\s*NODE/g),
+        ].map((match) => match[1]);
+        const block = blocks.find((candidate) => candidate.includes("const keep"));
+
+        if (!block) {
+            throw new Error("detect script is missing from the workflow template");
+        }
+
+        return block;
+    }
+
+    function runDetect(options: {
+        file: string;
+        exists: boolean;
+        frontmatter?: string;
+        env?: Record<string, string>;
+    }): { outputs: string; logs: string } {
+        const written: string[] = [];
+        const logs: string[] = [];
+        const sandbox = {
+            require: (id: string) => {
+                if (id === "child_process") {
+                    return {
+                        execSync: (command: string) =>
+                            command.startsWith("head ")
+                                ? (options.frontmatter ??
+                                  "---\ntitle: Post\nautoTranslate: true\n---\n")
+                                : `${options.file}\n`,
+                    };
+                }
+
+                if (id === "fs") {
+                    return {
+                        existsSync: () => options.exists,
+                        appendFileSync: (_path: string, value: string) =>
+                            written.push(value),
+                    };
+                }
+
+                if (id === "path") {
+                    return { basename };
+                }
+
+                throw new Error(`unexpected require("${id}")`);
+            },
+            process: {
+                env: {
+                    CONTENT_ROOT: "src/content",
+                    AUTO_TRANSLATE: "true",
+                    GH_EVENT: "push",
+                    BEFORE: "1111111111111111111111111111111111111111",
+                    AFTER: "2222222222222222222222222222222222222222",
+                    CHUNK_SIZE: "20",
+                    GITHUB_OUTPUT: "/dev/null",
+                    ...options.env,
+                },
+                exit: (code: number) => {
+                    throw new Error(`EXIT_${String(code)}`);
+                },
+            },
+            console: { log: (...args: unknown[]) => logs.push(args.join(" ")) },
+        };
+
+        try {
+            runInNewContext(detectSource(), sandbox);
+        } catch (error) {
+            // The script calls process.exit(0) on the "nothing to translate"
+            // path; a mock must stop execution exactly like the real thing.
+            if (!String(error).includes("EXIT_")) {
+                throw error;
+            }
+        }
+
+        return { outputs: written.join(""), logs: logs.join("\n") };
+    }
+
+    const file = "src/content/blog/en/gone.md";
+
+    it("skips EN paths that no longer exist instead of staging them", () => {
+        const { outputs, logs } = runDetect({ file, exists: false });
+
+        expect(outputs).toContain("chunks=[]");
+        expect(outputs).toContain("has_files=false");
+        expect(logs).toContain("源文件已删除/重命名");
+        expect(logs).toContain("本次变更仅包含 EN 文件删除");
+        expect(logs).not.toContain("待翻译");
+    });
+
+    it("still translates a surviving EN file with autoTranslate: true", () => {
+        const { outputs } = runDetect({ file, exists: true });
+
+        expect(outputs).toContain("has_files=true");
+        expect(outputs).toContain(`"files":"${file}"`);
+    });
+
+    it("falls back to git ls-files for a first push (before is all zeroes)", () => {
+        const { outputs } = runDetect({
+            file,
+            exists: true,
+            env: { BEFORE: "0000000000000000000000000000000000000000" },
+        });
+
+        expect(outputs).toContain("has_files=true");
+    });
+
+    it("does not translate an existing EN file without the opt-in flag", () => {
+        const { outputs, logs } = runDetect({
+            file,
+            exists: true,
+            frontmatter: "---\ntitle: Post\n---\n",
+        });
+
+        expect(outputs).toContain("has_files=false");
+        expect(logs).toContain("未开启 autoTranslate: true");
     });
 });
 

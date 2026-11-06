@@ -26,6 +26,12 @@
 #      监听 `__CONTENT_ROOT__/**/en/**`，即【所有集合】的 EN 文件。
 #      其它语言目录（/fr/ /de/ …）与 CI 自己提交的译文都不在匹配内，
 #      所以后台随意修改译文不会触发工作流，也不会形成回环。
+#      ⚠️ GitHub 的 `on.push.paths` 对【被删除】的文件同样会匹配，因此删除 / 重命名
+#      一篇 EN 文章也会启动本工作流。0.4.3 起 detect 会在读 frontmatter 前先排除
+#      磁盘上已不存在的文件，`has_files=false`，translate / publish 显示 Skipped，
+#      不再出现 "源文件不存在" 的假失败。
+#      注意：删除 EN 源文件【不会】自动删除其它语言目录下已发布的译文，
+#      如需彻底移除该文章，请连同各语言目录里的同名 md 一起提交删除。
 # 2) 单篇开关（唯一决定是否翻译）：
 #      EN 文件 frontmatter 里 `autoTranslate: true` → 送翻并覆盖目标语言译文；
 #      不写 / false → 普通修改，CI 完全不碰这篇文章。
@@ -39,7 +45,7 @@
 #      某个译文文件 frontmatter 里加 `translateLock: true` → 该语言版本
 #      永不覆盖，交给后台独占维护。或把 env.OVERWRITE_MODE 设为 "missing"，
 #      全局只补缺失译文、不碰任何已存在文件。
-# 4) 自动排除：draft:true、_template.md / templates 目录。
+# 4) 自动排除：draft:true、_template.md / templates 目录、本次 push 已删除的 EN 文件。
 #    全局暂停：env.AUTO_TRANSLATE = "false"。
 # 5) 存量站引导：到 Actions → i18n-translate → Run workflow，勾 force 并填
 #    scope 正则分批回填；只有打开开关的 EN 文件才会进入清单。
@@ -287,11 +293,19 @@ jobs:
 
                   const cr = process.env.CONTENT_ROOT;
                   const re = new RegExp('^' + cr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/.+/en/.+\\.md$');
+                  // `|| true`：目录里一个 EN 文件都没有时 grep 会 exit 1，
+                  // execSync 抛错会让 detect 整个 job 变红（而非正常 Skipped）。
+                  const listTracked = () => sh(`git ls-files | grep -E "${re.source}" || true`)
+                    .split('\n').filter(Boolean);
+                  const before = process.env.BEFORE || '';
+                  // 新建分支的首次 push：github.event.before 是全 0，
+                  // `git diff 000...0 AFTER` 会报 fatal: bad object。
+                  const firstPush = before !== '' && /^0+$/.test(before);
                   let map;
-                  if (process.env.GH_EVENT === 'workflow_dispatch' || process.env.FORCE === 'true') {
-                    map = sh(`git ls-files | grep -E "${re.source}"`).split('\n').filter(Boolean);
+                  if (process.env.GH_EVENT === 'workflow_dispatch' || process.env.FORCE === 'true' || firstPush) {
+                    map = listTracked();
                   } else {
-                    map = sh(`git diff --name-only "${process.env.BEFORE}" "${process.env.AFTER}"`)
+                    map = sh(`git diff --name-only "${before}" "${process.env.AFTER}"`)
                       .split('\n').filter(Boolean).filter(f => re.test(f));
                   }
 
@@ -300,14 +314,19 @@ jobs:
 
                   // 唯一开关：EN 文件 frontmatter 里显式写 autoTranslate: true 才送翻。
                   // 与集合无关 —— 产品、博客、页面一视同仁；不写或 false 就是普通修改。
+                  // 0.4.3：GitHub 的 on.push.paths 会把【删除 / 重命名旧路径】也算作
+                  // 匹配。这类路径在工作树里已经不存在，必须显式跳过，否则会被当成
+                  // 待译文件送进 Stage，触发 "源文件不存在" 的假失败并建 issue。
                   const keep = [];
-                  const reasons = { flag: 0, draft: 0, template: 0 };
+                  const reasons = { flag: 0, draft: 0, template: 0, deleted: 0 };
                   for (const f of map) {
                     const base = path.basename(f);
                     let reason = '';
                     if (base === '_template.md' || base === 'template.md' || /\/(templates|_templates)\//.test(f)) {
                       reason = '模板文件'; reasons.template++;
-                    } else if (fs.existsSync(f)) {
+                    } else if (!fs.existsSync(f)) {
+                      reason = '源文件已删除/重命名'; reasons.deleted++;
+                    } else {
                       const h = sh(`head -n 40 "${f}"`);
                       if (/^draft:\s*true\s*$/m.test(h)) { reason = '草稿'; reasons.draft++; }
                       else if (!/^autoTranslate:\s*true\s*$/m.test(h)) { reason = '未开启 autoTranslate: true'; reasons.flag++; }
@@ -316,11 +335,19 @@ jobs:
                     else keep.push(f);
                   }
 
+                  if (reasons.deleted > 0) {
+                    console.log('::notice::本次 push 删除/重命名了 ' + reasons.deleted + ' 个 EN 文件，已跳过自动翻译；其它语言目录下已发布的译文不会被自动删除，如需彻底移除请一并提交删除。');
+                  }
+
                   if (keep.length === 0) {
                     if (map.length > 0) {
-                      console.log('::warning::检测到 ' + map.length + ' 个 EN 变更文件，但没有一个开启 autoTranslate: true，本次不翻译（translate / publish 会显示 Skipped）。');
-                      console.log('::warning::跳过原因：未开启开关 ' + reasons.flag + ' 个，草稿 ' + reasons.draft + ' 个，模板 ' + reasons.template + ' 个。');
-                      console.log('::warning::需要自动翻译时，请在 EN 文件 frontmatter 里设 autoTranslate: true（或在 CMS 后台勾选该开关）。');
+                      console.log('::warning::检测到 ' + map.length + ' 个 EN 变更文件，但没有可翻译的 EN 源文件，本次不翻译（translate / publish 会显示 Skipped）。');
+                      console.log('::warning::跳过原因：未开启开关 ' + reasons.flag + ' 个，草稿 ' + reasons.draft + ' 个，模板 ' + reasons.template + ' 个，已删除/重命名 ' + reasons.deleted + ' 个。');
+                      if (reasons.deleted !== map.length) {
+                        console.log('::warning::需要自动翻译时，请在 EN 文件 frontmatter 里设 autoTranslate: true（或在 CMS 后台勾选该开关）。');
+                      } else {
+                        console.log('::notice::本次变更仅包含 EN 文件删除，属正常跳过，无需处理。');
+                      }
                     }
                     write('chunks', '[]'); write('has_files', 'false'); process.exit(0);
                   }
@@ -435,7 +462,11 @@ jobs:
                   STAGE_FILES=""
                   for f in $(echo "$CHUNK_FILES" | tr ';' '\n'); do
                     [ -z "$f" ] && continue
-                    [ -f "$f" ] || { echo "::error::源文件不存在: $f"; exit 1; }
+                    [ -f "$f" ] || {
+                      echo "::error::源文件不存在: $f（该 EN 文件可能已在本次 push 中被删除/重命名）。"
+                      echo "::error::0.4.3 起 detect 会先过滤已删除文件；若仍看到本错误，请执行 pnpm exec astro-sveltia-pages init:i18n 升级工作流后重跑。"
+                      exit 1
+                    }
                     rel="${f#"$CONTENT_ROOT"/}"              # {collection}/en/{slug}.md
                     coll="$(dirname "$(dirname "$rel")")"    # {collection}
                     slug="$(basename "${f%.md}")"            # {slug}

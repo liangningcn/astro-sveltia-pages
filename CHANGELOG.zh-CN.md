@@ -8,6 +8,31 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.4.3
+
+### 修复
+
+- **删除 EN 文章会触发一次假的翻译失败。** GitHub `on.push.paths` 对【被删除】的
+  文件同样匹配：删除 `src/content/blog/en/xxx.md` 仍会启动工作流，而 0.4.2 的
+  detect 只处理「文件存在时读 frontmatter」这一分支，文件不存在时 `reason`
+  保持为空 → 该路径被当成待译文件送进 `Stage EN sources`，随即报
+  `源文件不存在` / `exit 1`，publish 失败并自动建一条 `ci-failure` issue。
+- detect 现在在读取 frontmatter **之前**显式排除工作树里已不存在的 EN 路径
+  （删除 / 重命名的旧路径），输出 `has_files=false`，translate / publish 显示
+  Skipped；跳过原因统计新增「已删除/重命名」，并用 notice 说明这是正常跳过。
+- detect 顺手加固两个边界：新建分支首次 push（`github.event.before` 全 0，
+  `git diff 000…0 AFTER` 会 `fatal: bad object`）改为回退 `git ls-files`；
+  仓库里一个 EN 文件都没有时 `grep` 无匹配不再让 `execSync` 抛错。
+- `Stage EN sources` 的「源文件不存在」错误改为带排查指引：0.4.3 正常情况下
+  不会再走到这里，若仍出现则提示重跑 `init:i18n` 升级工作流。
+- 明确一个行为边界：删除 EN 源文件**不会**自动删除其它语言目录下已发布的译文；
+  若要彻底移除该文章，需连同各语言目录里的同名 md 一起提交删除。
+
+### 迁移
+
+- 每个消费方仓库重跑 `pnpm exec astro-sveltia-pages init:i18n` 并提交重新生成的
+  三份文件（模板版本 `0.4.3`）。Secret、CMS 配置、frontmatter 都不用改。
+
 ## 0.4.2
 
 ### 修复

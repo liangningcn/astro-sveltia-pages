@@ -473,6 +473,14 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
     (`slug`, image paths, …) marked `i18n: duplicate`, and make sure the backend
     does **not** set `skip_ci: true`.
 
+    > **Deleting a post (0.4.3+):** `on.push.paths` also matches deleted files,
+    > so removing an EN post still starts the workflow. detect now filters out
+    > paths that no longer exist, and translate / publish show Skipped instead
+    > of failing with "source file not found" and opening a bogus issue.
+    > Deleting the EN source does **not** remove the already published
+    > translations in other locale folders — commit those deletions too if the
+    > post should disappear entirely.
+
 > **Protecting human translations:** the default `OVERWRITE_MODE: "all"` means
 > every EN change on a flagged entry regenerates and overwrites all target
 > locales. To keep CMS-edited translations, either set `OVERWRITE_MODE: "missing"`

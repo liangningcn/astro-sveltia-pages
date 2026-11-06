@@ -10,6 +10,39 @@ section below.
 
 ---
 
+## 0.4.3
+
+### Fixed
+
+- **Deleting an EN post triggered a bogus translation failure.** GitHub's
+  `on.push.paths` also matches _deleted_ paths: removing
+  `src/content/blog/en/xxx.md` still starts the workflow, but 0.4.2's detect
+  only handled the "file exists → read frontmatter" branch. For a missing file
+  `reason` stayed empty, so the path was queued for translation, `Stage EN
+sources` failed with "source file not found" / `exit 1`, and `publish`
+  reported failure and opened a `ci-failure` issue.
+- detect now explicitly excludes EN paths that no longer exist in the working
+  tree (deleted paths and the old side of a rename) **before** reading
+  frontmatter. It emits `has_files=false`, so translate / publish show
+  Skipped. Skip counters gain "deleted/renamed" and a notice explains that
+  this is an expected no-op.
+- Two extra detect edge cases: a first push to a new branch
+  (`github.event.before` is all zeroes, so `git diff 000…0 AFTER` fails with
+  `fatal: bad object`) now falls back to `git ls-files`; and a repository with
+  zero EN files no longer crashes when `grep` finds no match.
+- The "source file not found" error in `Stage EN sources` now carries
+  troubleshooting guidance: 0.4.3 should never reach it, and if it does the
+  message says to re-run `init:i18n` to upgrade the workflow.
+- Clarified behaviour: deleting an EN source does **not** delete the already
+  published translations in the other locale folders. To remove a post
+  entirely, commit the deletions of the same slug in every locale folder too.
+
+### Migration
+
+- Re-run `pnpm exec astro-sveltia-pages init:i18n` in every consumer repo and
+  commit the three regenerated files (template `0.4.3`). No Secret, CMS config
+  or frontmatter changes are needed.
+
 ## 0.4.2
 
 ### Fixed

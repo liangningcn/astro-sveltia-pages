@@ -204,6 +204,14 @@ async function buildI18nTemplates() {
             "Verify destination layout",
             "translations must land in <collection>/<lang>/ (0.4.2)",
         ],
+        [
+            "源文件已删除/重命名",
+            "deleted EN paths must be filtered before staging (0.4.3)",
+        ],
+        [
+            "const firstPush = before !== '' && /^0+$/.test(before);",
+            "first-push (all-zero before sha) fallback (0.4.3)",
+        ],
         ["Fail when translation did not succeed", "publish-side failure gate"],
         ["filename_template:", "explicit translation filename template"],
         [

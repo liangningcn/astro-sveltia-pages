@@ -453,6 +453,12 @@ export const collections = {
     不再按集合区分，所以产品、博客、页面一视同仁。不可翻译字段（`slug`、
     图片路径等）仍标记 `i18n: duplicate`，backend **不要**设置 `skip_ci: true`。
 
+    > **删除文章（0.4.3 起）**：`on.push.paths` 对删除的文件同样匹配，所以删掉
+    > 一篇 EN 文章也会启动工作流。detect 会先过滤掉已不存在的路径，translate /
+    > publish 显示 Skipped，不会再出现「源文件不存在」的假失败与误报 issue。
+    > 但删除 EN 源文件**不会**自动删除其它语言目录下已发布的译文；要彻底移除
+    > 文章，请连同各语言目录里的同名 md 一起提交删除。
+
     > **保护人工译文**：默认 `OVERWRITE_MODE: "all"`，开关打开的文章每次 EN
     > 变更都会重新生成并覆盖全部译文。若要保留后台改过的译文，把工作流里的
     > `OVERWRITE_MODE` 改为 `"missing"`（只补写尚不存在的译文），或在某个译文
