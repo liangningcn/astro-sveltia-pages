@@ -10,6 +10,51 @@ section below.
 
 ---
 
+## 0.4.1
+
+### Fixed
+
+- **The translation engine never received the DeepSeek credentials and silently
+  fell back to GitHub Models.** `pelikhan/action-continuous-translation@v0.2.11`
+  exposes `openai_api_key`, `openai_api_base` and `model_alias` as action inputs,
+  which GitHub injects into the container as `INPUT_OPENAI_API_KEY`, etc. The
+  bundled GenAIScript 2.3.9, however, reads the OpenAI provider from
+  **unprefixed** `OPENAI_API_KEY` / `OPENAI_API_BASE` and model aliases from
+  `GENAISCRIPT_MODEL_<ID>`. With only `with:` inputs present,
+  `host.resolveLanguageModel('translation')` found no usable provider and
+  `genaisrc/src/models.mts` fell back to its hard-coded default
+  `github:openai/gpt-4o`. No `github_token` was supplied either, so all 15
+  locales logged `GitHub authentication required`, zero translated files were
+  written, and genaiscript still printed `success` with exit code 0 — the
+  workflow only failed later at `Verify translations were produced` with a
+  misleading "15 missing translations / check the API key" message.
+  Real symptom (nextcharm, 2026-11-06): `Error connecting to translation model
+github:openai/gpt-4o: GitHub authentication required`.
+- The translate step now injects `OPENAI_API_KEY`, `OPENAI_API_BASE`,
+  `GENAISCRIPT_DEFAULT_MODEL`, `GENAISCRIPT_MODEL_TRANSLATION` and
+  `GENAISCRIPT_MODEL_VALIDATION` through step-level `env:` (which Docker actions
+  do forward verbatim). The `with:` inputs remain for forward compatibility but
+  are no longer the source of truth.
+- Added `env.TRANSLATION_MODEL` (default `deepseek-flash`) and
+  `env.OPENAI_API_BASE` so a retired model name can be changed in one place.
+- Added a **Preflight translation credentials** step: fails immediately on a
+  missing/invalid `DEEPSEEK_API_KEY` (HTTP 401/403 from `/models`), logs the
+  configured model and endpoint, and warns when the model is absent from the
+  provider's model list — instead of discovering a provider misconfiguration
+  only after 15 failed locale runs.
+- Failure output in `Verify translations were produced` and the auto-created
+  issue now point at the preflight step and the `github:openai/gpt-4o` fallback
+  signature first, rather than suggesting the API key as the default suspect.
+
+### Migration
+
+- Re-run `pnpm exec astro-sveltia-pages init:i18n` in every consumer repository
+  and commit the three regenerated files (template version `0.4.1`). No CMS
+  config, frontmatter or secret changes are required: `DEEPSEEK_API_KEY` stays
+  exactly where it is.
+- If DeepSeek renames its models, change `env.TRANSLATION_MODEL` and re-run the
+  workflow; the preflight step prints the available model ids.
+
 ## 0.4.0
 
 ### Breaking changes

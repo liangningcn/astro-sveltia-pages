@@ -128,6 +128,13 @@ async function buildI18nTemplates() {
             "__CONTENT_ROOT__/**/en/**",
             "autoTranslate: true",
             "OVERWRITE_MODE",
+            // 0.4.1: the Docker action only reads unprefixed / GENAISCRIPT_*
+            // variables. Dropping these silently reverts the engine to
+            // github:openai/gpt-4o and produces zero translations.
+            "TRANSLATION_MODEL",
+            "OPENAI_API_BASE:",
+            "GENAISCRIPT_MODEL_TRANSLATION",
+            "Preflight translation credentials",
             "__TARGET_LANGS__",
             "__CONFIG_FILE__",
         ],
@@ -169,7 +176,14 @@ async function buildI18nTemplates() {
     const invariants = [
         ['STAGING_DIR: "i18n-staging"', "non-hidden staging dir (glob skips dot dirs)"],
         ["pelikhan/action-continuous-translation@v0.2.11", "pinned action version"],
-        ["openai:deepseek-flash", "current DeepSeek model id"],
+        [
+            'TRANSLATION_MODEL: "deepseek-flash"',
+            "current DeepSeek model id (single source of truth)",
+        ],
+        [
+            "openai:${{ env.TRANSLATION_MODEL }}",
+            "GenAIScript model alias derived from TRANSLATION_MODEL",
+        ],
         ["Reclaim ownership of Docker-generated files", "Docker root permission fix"],
         ["Verify translations were produced", "zero-translation failure gate"],
         ["Fail when translation did not succeed", "publish-side failure gate"],

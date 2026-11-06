@@ -48,8 +48,17 @@
 #   默认走 DeepSeek（OpenAI 兼容端点）：
 #     • DEEPSEEK_API_KEY —— DeepSeek API Key（sk- 开头）。
 #        申请：platform.deepseek.com → API Keys → Create new API key，复制后立即保存（只显示一次）。
-#        填到：本文件翻译步骤的 secrets.DEEPSEEK_API_KEY（端点 https://api.deepseek.com 已写死）。
-#     • 模型 deepseek-flash 为当前官方名；0.3.4 用的旧版 flash 别名已退役，不要再用。
+#     • 模型在 env.TRANSLATION_MODEL 里配置（默认 deepseek-flash，0.3.4 的旧 flash 别名已退役）。
+#
+#   ⚠️ 0.4.1 修复（重要）：pelikhan@v0.2.11 的 `openai_api_key` / `openai_api_base` /
+#      `model_alias` 这些 with 输入会被 GitHub runner 注入成 `INPUT_*` 变量，但容器内
+#      GenAIScript 2.3.9 读取的是 **无前缀** 的 `OPENAI_API_KEY` / `OPENAI_API_BASE`，
+#      以及 `GENAISCRIPT_MODEL_TRANSLATION`。因此仅靠 with 传参时 provider 无凭证，
+#      `resolveLanguageModel('translation')` 解析失败并静默回退到默认的
+#      `github:openai/gpt-4o` —— 而模板并没有传 github_token，于是 15 个语言逐一报
+#      "GitHub authentication required"，0 篇译文，genaiscript 却仍打印 success / exit 0。
+#      翻译步骤现在显式用 step env 注入这些标准变量，并在翻译前做凭证预检。
+#      with 里的三项保留只为兼容上游未来版本，不要把它们当作唯一配置来源。
 # ───────────────────────────────────────────────────────────────────
 
 name: i18n-translate
@@ -115,6 +124,11 @@ env:
     # translations_dir 只放 usage.jsonl 与 <lang>.json 增量缓存；
     # 真正的译文由 filename_template 写到源文件同目录，故也落在 STAGING_DIR 内。
     TRANSLATIONS_DIR: "i18n-translations"
+    # 翻译模型（OpenAI 兼容 id = openai:<model>）。DeepSeek 更新模型名时只改这里，
+    # 预检步骤会把它与 /models 返回的可用模型列表核对。
+    TRANSLATION_MODEL: "deepseek-flash"
+    # OpenAI 兼容端点；与 DEEPSEEK_API_KEY 一起由翻译步骤注入容器环境变量。
+    OPENAI_API_BASE: "https://api.deepseek.com"
 
 jobs:
     # ── 阶段 1：检测变更 + 过滤 + 切片（单 job，输出 JSON 分片列表）──
@@ -332,6 +346,52 @@ jobs:
                   restore-keys: |
                       i18n-${{ runner.os }}-${{ matrix.i }}-
 
+            # (修复 0.4.1) 凭证预检：上游在 provider 解析失败时会静默回退到
+            # github:openai/gpt-4o，15 个语言逐一报认证错误后仍 exit 0，
+            # 只有 Verify 步骤才发现 0 篇译文。这里在启动翻译前就暴露 Key / 模型名问题。
+            - name: Preflight translation credentials
+              env:
+                  OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+                  OPENAI_API_BASE: ${{ env.OPENAI_API_BASE }}
+                  TRANSLATION_MODEL: ${{ env.TRANSLATION_MODEL }}
+              run: |
+                  set -euo pipefail
+                  if [ -z "${OPENAI_API_KEY:-}" ]; then
+                    echo "::error::缺少仓库 Secret DEEPSEEK_API_KEY（Settings → Secrets and variables → Actions）。"
+                    exit 1
+                  fi
+                  echo "翻译模型: openai:$TRANSLATION_MODEL"
+                  echo "API 端点: $OPENAI_API_BASE"
+                  # curl 在超时/网络错误时 -w 已会输出 000；用 `|| true` 防止
+                  # 再追加一次 000 拼成 "000000" 而漏掉下面的 case 分支。
+                  code="$(curl -sS --max-time 20 -o /tmp/i18n-models.json -w '%{http_code}' \
+                    -H "Authorization: Bearer $OPENAI_API_KEY" "$OPENAI_API_BASE/models" || true)"
+                  [ -n "$code" ] || code="000"
+                  echo "GET /models → HTTP $code"
+                  case "$code" in
+                    401|403)
+                      echo "::error::DeepSeek 拒绝了该 API Key（HTTP $code）：检查 Key 是否过期、是否复制完整。"
+                      exit 1
+                      ;;
+                    200)
+                      ids="$(node -e "const d=require('/tmp/i18n-models.json'); console.log((d.data||[]).map(m=>m.id).join(' '))" 2>/dev/null || true)"
+                      echo "可用模型: ${ids:-（响应中无 data 列表）}"
+                      case " $ids " in
+                        *" $TRANSLATION_MODEL "*)
+                          echo "✅ 模型 $TRANSLATION_MODEL 已在可用列表中。"
+                          ;;
+                        *)
+                          if [ -n "$ids" ]; then
+                            echo "::warning::TRANSLATION_MODEL=$TRANSLATION_MODEL 不在可用模型列表中；请按上面的列表改 env.TRANSLATION_MODEL，否则翻译会失败。"
+                          fi
+                          ;;
+                      esac
+                      ;;
+                    *)
+                      echo "::warning::无法读取模型列表（HTTP $code），跳过模型名核对；若后续译文缺失请检查网络、Key 余额与端点。"
+                      ;;
+                  esac
+
             # 暂存英文源到"无语言目录、且非隐藏"的扁平路径后再翻译。
             # 原因(pelikhan 兼容性 bug)：pelikhan@v0.2.11 的 translator.genai.mts 里有
             #   .filter(({filename}) => !/\.[a-z]{2,2}(-[a-zA-Z]{2,3})?\.mdx?$/.test(filename))
@@ -383,6 +443,16 @@ jobs:
             # 固定到 v0.2.11，避免浮动 @v0 随上游变更引入回归。
             - name: Translate chunk ${{ matrix.i }}
               uses: pelikhan/action-continuous-translation@v0.2.11
+              # (修复 0.4.1) 关键：Docker action 的 with 输入会变成 INPUT_* 变量，
+              # 但容器内 GenAIScript 2.3.9 只认下面这些无前缀 / GENAISCRIPT_* 变量。
+              # 少写这一块 → provider 无凭证 → 静默回退 github:openai/gpt-4o →
+              # 全部语言认证失败、0 篇译文、genaiscript 仍报 success（见文件头注释）。
+              env:
+                  OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+                  OPENAI_API_BASE: ${{ env.OPENAI_API_BASE }}
+                  GENAISCRIPT_DEFAULT_MODEL: "openai:${{ env.TRANSLATION_MODEL }}"
+                  GENAISCRIPT_MODEL_TRANSLATION: "openai:${{ env.TRANSLATION_MODEL }}"
+                  GENAISCRIPT_MODEL_VALIDATION: "openai:${{ env.TRANSLATION_MODEL }}"
               with:
                   source: en
                   lang: ${{ env.TARGET_LANGS }}
@@ -391,11 +461,11 @@ jobs:
                   # 默认 {{dirname}}/{{basename}}.{{lang}}{{extname}} → 与源文件同目录。
                   filename_template: "{{dirname}}/{{basename}}.{{lang}}{{extname}}"
                   translations_dir: ${{ env.TRANSLATIONS_DIR }}
+                  # 以下三项保留只为兼容上游未来版本；真正的凭证来源是上面的 step env。
                   openai_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
-                  openai_api_base: https://api.deepseek.com
-                  # deepseek-flash 为当前官方模型名（0.3.4 的旧版 flash 别名已退役）。
+                  openai_api_base: ${{ env.OPENAI_API_BASE }}
                   # GenAIScript 模型 id 格式为 provider:model。
-                  model_alias: "translation: openai:deepseek-flash"
+                  model_alias: "translation: openai:${{ env.TRANSLATION_MODEL }}"
                   instructions: |
                       仅翻译正文与可翻译字段；
                       严禁翻译：slug、图片/媒体路径、以 http(s):// 开头的外链、代码块与行内代码。
@@ -448,7 +518,12 @@ jobs:
                     echo "缺失清单:$MISSING"
                     echo "暂存目录实际内容："
                     find "$STAGE" -type f -printf '  %p (%s bytes)\n' | head -80 || true
-                    echo "排查顺序：1) DEEPSEEK_API_KEY 是否有效/余额充足 2) 模型名 3) Actions 日志里是否有 'No files or not matching languages selected.' 4) pelikhan 是否因 markdown 校验失败或内容无变化而跳过写文件"
+                    echo "排查顺序："
+                    echo "  1) Preflight translation credentials：Key 是否存在、GET /models 是否 200、TRANSLATION_MODEL 是否在可用模型列表；"
+                    echo "  2) Translate chunk 日志若出现 'Error connecting to translation model github:openai/gpt-4o'，"
+                    echo "     说明 DeepSeek 凭证未被 GenAIScript 读取（0.4.0 及更早模板的通病）：升级包并重跑 init:i18n；"
+                    echo "  3) DEEPSEEK_API_KEY 是否有效 / 余额是否充足、模型名与端点是否匹配；"
+                    echo "  4) 是否出现 'No files or not matching languages selected.'（源文件路径 / 暂存目录问题）。"
                     exit 1
                   fi
                   echo "✅ 译文完整：$TOTAL 个 (文件 × 语言) 全部产出。"
@@ -584,13 +659,15 @@ jobs:
                         '运行链接: ' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId,
                         '',
                         '排查顺序：',
-                        '1. detect 的 Verify i18n template version：模板版本是否与 lockfile / package.json 一致；',
-                        '   不一致说明升级依赖后没重跑 init:i18n —— 旧 workflow 会静默产出 0 篇译文，',
-                        '   典型症状正是 "No files or not matching languages selected." + "mkdir: Permission denied"。',
-                        '   修复：pnpm exec astro-sveltia-pages init:i18n，并提交更新后的三个文件。',
-                        '2. translate 分片日志里的 Verify translations were produced（缺失清单会列出 文件→语言）；',
-                        '3. DEEPSEEK_API_KEY 是否有效、余额是否充足；',
-                        '4. 是否出现 No files or not matching languages selected.（源文件路径/暂存目录问题）。'
+                        '1. translate 分片的 Preflight translation credentials：Key 是否存在、GET /models 是否 200、',
+                        '   TRANSLATION_MODEL 是否在可用模型列表中；',
+                        '2. Translate chunk 日志若出现 "Error connecting to translation model github:openai/gpt-4o"，',
+                        '   说明 DeepSeek 凭证/模型别名未被 GenAIScript 读取 —— 这是 0.4.0 及更早模板的通病：',
+                        '   升级 astro-sveltia-pages 并重跑 pnpm exec astro-sveltia-pages init:i18n，提交三份生成文件。',
+                        '3. detect 的 Verify i18n template version：模板版本是否与 lockfile / package.json 一致；',
+                        '   不一致说明升级依赖后没重跑 init:i18n，旧 workflow 会静默产出 0 篇译文。',
+                        '4. Verify translations were produced 的缺失清单（文件→语言）、DEEPSEEK_API_KEY 余额、',
+                        '   以及是否有 No files or not matching languages selected.（源文件路径/暂存目录问题）。'
                       ].join('\n');
                       await github.rest.issues.create({
                         owner: context.repo.owner,

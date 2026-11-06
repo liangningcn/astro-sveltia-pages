@@ -66,6 +66,32 @@ describe("i18n workflow templates", () => {
         expect(content).toContain("OVERWRITE_MODE");
         expect(content).not.toContain("SKIP_COLLECTIONS");
         expect(content).not.toContain("__COLLECTION_EN_PATH__");
+
+        // 0.4.1: GenAIScript only reads unprefixed / GENAISCRIPT_* env vars.
+        // With-inputs alone (INPUT_OPENAI_API_KEY etc.) leave the provider
+        // unconfigured, so the engine silently falls back to GitHub Models.
+        expect(content).toContain("GENAISCRIPT_MODEL_TRANSLATION");
+        expect(content).toContain("OPENAI_API_BASE");
+        expect(content).toContain("TRANSLATION_MODEL");
+        expect(content).toContain("Preflight translation credentials");
+    });
+
+    it("injects translation credentials as step env, not just with-inputs", () => {
+        const content = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
+        const lines = content.split("\n");
+        const translateAt = lines.findIndex((line) => line.includes("Translate chunk"));
+        const withAt = lines.findIndex(
+            (line, index) => index > translateAt && line.trim() === "with:",
+        );
+
+        expect(translateAt).toBeGreaterThan(-1);
+        expect(withAt).toBeGreaterThan(translateAt);
+
+        // The env block must sit between the step name and its `with:` block.
+        const stepHead = lines.slice(translateAt, withAt).join("\n");
+        expect(stepHead).toContain("OPENAI_API_KEY");
+        expect(stepHead).toContain("GENAISCRIPT_MODEL_TRANSLATION");
+        expect(stepHead).toContain("GENAISCRIPT_MODEL_VALIDATION");
     });
 
     it("every i18n template carries the version marker placeholder", () => {
@@ -122,7 +148,9 @@ describe("i18n workflow 0.3.5 regression guards", () => {
 
     it("pins the upstream action and uses the current DeepSeek model", () => {
         expect(workflow).toContain("pelikhan/action-continuous-translation@v0.2.11");
-        expect(workflow).toContain("openai:deepseek-flash");
+        // 0.4.1: model id lives in one env var, referenced by every alias.
+        expect(workflow).toContain('TRANSLATION_MODEL: "deepseek-flash"');
+        expect(workflow).toContain("openai:${{ env.TRANSLATION_MODEL }}");
         expect(workflow).not.toContain("deepseek-v4-flash");
         expect(workflow).toContain("filename_template:");
         expect(workflow).toContain("translations_dir:");

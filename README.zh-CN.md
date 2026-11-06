@@ -416,8 +416,15 @@ export const collections = {
 2.  在仓库添加 GitHub Secret（**Settings → Secrets and variables → Actions → New repository secret**）：
 
     - `DEEPSEEK_API_KEY` — DeepSeek API Key（`sk-…` 开头），申请地址
-      <https://platform.deepseek.com>。工作流会调用 DeepSeek 的 OpenAI 兼容端点
-      `https://api.deepseek.com`，使用 `deepseek-flash`（旧名 `deepseek-v4-flash` 已退役）。
+      <https://platform.deepseek.com>。端点由 `env.OPENAI_API_BASE` 配置
+      （默认 `https://api.deepseek.com`），模型由 `env.TRANSLATION_MODEL` 配置
+      （默认 `deepseek-flash`，旧名 `deepseek-v4-flash` 已退役）。
+      翻译步骤会把 Key 注入为 `OPENAI_API_KEY`、把模型注入为
+      `GENAISCRIPT_MODEL_TRANSLATION` / `GENAISCRIPT_MODEL_VALIDATION`——这些
+      变量名是 GenAIScript 硬性要求的；只写 action 的 `with:` 输入
+      （`openai_api_key` / `model_alias`）会静默回退到 `github:openai/gpt-4o`，
+      导致一篇译文都产不出（0.4.1 已修）。翻译前还有
+      **Preflight translation credentials** 步骤校验 Key 并打印可用模型列表。
 
 3.  给 Sveltia CMS 的**每个集合**加一个「自动翻译」开关（并写进 `_template.md`，
     让新建文章默认关闭）：

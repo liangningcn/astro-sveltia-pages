@@ -8,6 +8,44 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.4.1
+
+### 修复
+
+- **翻译引擎始终没收到 DeepSeek 凭证，静默回退到了 GitHub Models。**
+  `pelikhan/action-continuous-translation@v0.2.11` 把 `openai_api_key`、
+  `openai_api_base`、`model_alias` 声明为 action 输入，GitHub 会把它们注入成
+  `INPUT_OPENAI_API_KEY` 等变量；但其内置的 GenAIScript 2.3.9 读取 OpenAI
+  provider 用的是**无前缀**的 `OPENAI_API_KEY` / `OPENAI_API_BASE`，模型别名用
+  `GENAISCRIPT_MODEL_<ID>`。只传 `with:` 时
+  `host.resolveLanguageModel('translation')` 找不到可用 provider，
+  `genaisrc/src/models.mts` 便回退到硬编码默认值 `github:openai/gpt-4o`；而模板
+  又没有传 `github_token`，于是 15 个语言逐一报
+  `GitHub authentication required`，一篇译文都没写出，genaiscript 却仍打印
+  `success` 并以 exit 0 结束 —— 直到 `Verify translations were produced` 才失败，
+  且错误信息误导性地指向「检查 API Key」。
+  真实现象（nextcharm，2026-11-06）：
+  `Error connecting to translation model github:openai/gpt-4o: GitHub authentication required`。
+- 翻译步骤改为通过 step 级 `env:` 显式注入 `OPENAI_API_KEY`、`OPENAI_API_BASE`、
+  `GENAISCRIPT_DEFAULT_MODEL`、`GENAISCRIPT_MODEL_TRANSLATION`、
+  `GENAISCRIPT_MODEL_VALIDATION`（Docker action 会原样透传）。`with:` 里的三项
+  保留只为兼容上游未来版本，不再是凭证来源。
+- 新增 `env.TRANSLATION_MODEL`（默认 `deepseek-flash`）与 `env.OPENAI_API_BASE`，
+  模型退役时只改一处即可。
+- 新增 **Preflight translation credentials** 步骤：Key 缺失或 `/models` 返回
+  401/403 时立即失败；打印配置的模型与端点；模型不在服务商模型列表时给出告警。
+  不再等 15 个语言各失败一次才发现 provider 配错。
+- `Verify translations were produced` 与自动创建的 issue 的排查顺序改为先看
+  预检结果和 `github:openai/gpt-4o` 回退特征，不再默认怀疑 API Key。
+
+### 迁移
+
+- 在每个消费方仓库重跑 `pnpm exec astro-sveltia-pages init:i18n` 并提交重新生成的
+  三份文件（模板版本 `0.4.1`）。**不需要**改 CMS 配置、frontmatter 或 Secret：
+  `DEEPSEEK_API_KEY` 保持在原处即可。
+- 若 DeepSeek 更名模型，改 `env.TRANSLATION_MODEL` 后重跑；预检步骤会打印可用
+  模型 id 列表。
+
 ## 0.4.0
 
 ### 破坏性变更

@@ -102,6 +102,35 @@ describe("init:i18n — first run", () => {
         expect(glossary).not.toContain("__PROJECT_NAME__");
     });
 
+    it("injects GenAIScript-compatible credential env into the translate step", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+
+        runInitI18n([], cwd);
+
+        type Step = { name?: string; env?: Record<string, string> };
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as {
+            jobs: { translate: { steps: Step[] } };
+        };
+        const translateStep = doc.jobs.translate.steps.find((step) =>
+            step.name?.startsWith("Translate chunk"),
+        );
+
+        // 0.4.1: with-inputs become INPUT_* vars that GenAIScript 2.3.9 does
+        // not read for the OpenAI provider, silently reverting to GitHub Models.
+        expect(translateStep?.env).toMatchObject({
+            OPENAI_API_KEY: "${{ secrets.DEEPSEEK_API_KEY }}",
+            OPENAI_API_BASE: "${{ env.OPENAI_API_BASE }}",
+            GENAISCRIPT_MODEL_TRANSLATION: "openai:${{ env.TRANSLATION_MODEL }}",
+            GENAISCRIPT_MODEL_VALIDATION: "openai:${{ env.TRANSLATION_MODEL }}",
+        });
+        expect(
+            doc.jobs.translate.steps.some(
+                (step) => step.name === "Preflight translation credentials",
+            ),
+        ).toBe(true);
+    });
+
     it("derives the wildcard trigger from --content-root, not from collections", () => {
         const cwd = makeTempDir();
         writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);

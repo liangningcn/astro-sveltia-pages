@@ -430,8 +430,15 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
 
     - `DEEPSEEK_API_KEY` — a DeepSeek API key (`sk-…`) from
       <https://platform.deepseek.com>. The workflow calls DeepSeek's OpenAI-compatible
-      endpoint `https://api.deepseek.com` with `deepseek-flash` (the old
-      `deepseek-v4-flash` name has been retired).
+      endpoint `env.OPENAI_API_BASE` (`https://api.deepseek.com`) with the model in
+      `env.TRANSLATION_MODEL` (default `deepseek-flash`; the old
+      `deepseek-v4-flash` name has been retired). The translate step injects the
+      key as `OPENAI_API_KEY` and the aliases as `GENAISCRIPT_MODEL_TRANSLATION` /
+      `GENAISCRIPT_MODEL_VALIDATION` — those exact variable names are required by
+      GenAIScript; action `with:` inputs alone (`openai_api_key`, `model_alias`)
+      are not enough and cause a silent fallback to `github:openai/gpt-4o`.
+      A **Preflight translation credentials** step validates the key and prints
+      the provider's available model ids before any translation starts.
 
 3.  Add an **auto-translate toggle** to every CMS collection's `fields` (and to
     `_template.md`, so new entries default to off):
