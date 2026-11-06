@@ -283,6 +283,45 @@ describe("i18n workflow 0.4.3 regression guards", () => {
     });
 });
 
+// 0.4.4: 15 locales were translated successfully but the whole batch was lost
+// because the FIRST push of i18n/batch-<run_id> rebased onto a remote ref that
+// did not exist yet. The combined cache action also dropped those translations'
+// incremental cache on any failed job, so a rerun paid for the model again.
+describe("i18n workflow 0.4.4 regression guards", () => {
+    const workflow = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
+
+    it("pushes a new batch branch directly instead of rebasing a missing ref", () => {
+        expect(workflow).toContain('git rev-parse --verify "refs/remotes/origin/$BR"');
+        expect(workflow).toContain('elif git push -u origin "$BR"; then');
+        expect(workflow).toContain("git rebase --abort 2>/dev/null || true");
+        // Concurrency path must stay intact for shards that arrive later.
+        expect(workflow).toContain('git push --force-with-lease origin "$BR"');
+    });
+
+    it("saves the incremental cache even when publishing fails", () => {
+        expect(workflow).toContain("uses: actions/cache/restore@v4");
+        expect(workflow).toContain("uses: actions/cache/save@v4");
+        expect(workflow).not.toContain("uses: actions/cache@v4");
+        expect(workflow).toContain("Save translation cache");
+        expect(workflow).toContain("steps.cache_check.outputs.has_files == 'true'");
+        // An empty directory must never become the "most recent cache".
+        expect(workflow).toContain('compgen -G "$TRANSLATIONS_DIR/*.json"');
+        expect(workflow).toContain("continue-on-error: true");
+    });
+
+    it("documents where the cache lives and how to recover it", () => {
+        expect(workflow).toContain("翻译缓存（i18n-translations/<lang>.json");
+        expect(workflow).toContain("没有 Cache saved 就去该 run 页面下载");
+        expect(workflow).toContain("translation-logs-<run_id>-<shard>");
+        expect(workflow).toContain("兜底副本在 artifact");
+    });
+
+    it("names the first-push symptom in the failure issue", () => {
+        expect(workflow).toContain("推送 batch 分支失败");
+        expect(workflow).toContain("0.4.3 及更早模板");
+    });
+});
+
 // 0.3.6 fixes the "upgraded the package, still running the 0.3.4 workflow"
 // failure: the version check has to live in CI, not only in local commands.
 describe("i18n workflow 0.3.6 regression guards", () => {

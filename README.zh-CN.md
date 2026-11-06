@@ -435,6 +435,17 @@ export const collections = {
         `<content-root>/<collection>/<lang>/<slug>.md`（例如
         `src/content/blog/fr/<slug>.md`）。
 
+        **翻译缓存（0.4.4 起）**：`i18n-translations/<lang>.json` 是「源片段 → 译文」
+        字典，源文本没变就不调用模型、不重复计费。它同时存在三处：run 内工作目录、
+        GitHub Actions cache、以及 `if: always()` 上传的 artifact
+        `translation-logs-<run_id>-<shard>`（发布失败也一定在，默认保留 90 天）。
+        0.4.4 把缓存拆成 `actions/cache/restore@v4` + `actions/cache/save@v4`，
+        **发布失败也保存缓存**，重跑不必重新付费调用模型。若日志开头是
+        `Cache not found`、结尾没有 `Cache saved`，就到该 run 页面下载 artifact，
+        把 `*.json` 放回 `i18n-translations/` 再重跑即可恢复。
+        Actions cache 7 天未访问会被清理、总配额 10GB 按 LRU 淘汰；只有需要永久
+        留存才把该目录提交进仓库（默认不建议，每次翻译会多出 15 个 JSON 的 diff）。
+
 3.  给 Sveltia CMS 的**每个集合**加一个「自动翻译」开关（并写进 `_template.md`，
     让新建文章默认关闭）：
 

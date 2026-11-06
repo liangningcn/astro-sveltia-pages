@@ -451,6 +451,21 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
         `<content-root>/<collection>/<lang>/<slug>.md` (e.g.
         `src/content/blog/fr/<slug>.md`).
 
+        **Translation cache (0.4.4+):** `i18n-translations/<lang>.json` maps
+        source fragments to translations; unchanged source text means no model
+        call and no extra cost. It exists in three places: the run's working
+        directory, the GitHub Actions cache, and the per-shard artifact
+        `translation-logs-<run_id>-<shard>` uploaded with `if: always()` (always
+        present after a failure, retained 90 days by default). 0.4.4 splits the
+        cache into `actions/cache/restore@v4` + `actions/cache/save@v4`, so
+        **the cache is saved even when publishing fails** and a rerun does not
+        pay for the model again. If the log starts with `Cache not found` and
+        has no `Cache saved` at the end, download the artifact from that run,
+        put the `*.json` files back into `i18n-translations/`, and rerun.
+        Actions cache entries unused for 7 days are evicted (10 GB, LRU); only
+        commit the directory if you need persistence beyond that window (not
+        recommended by default — every translation adds 15 JSON diffs).
+
 3.  Add an **auto-translate toggle** to every CMS collection's `fields` (and to
     `_template.md`, so new entries default to off):
 

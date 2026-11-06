@@ -178,6 +178,42 @@ describe("init:i18n — first run", () => {
         expect(installer?.run?.split("VERIFY_EOF").length).toBe(3);
     });
 
+    it("stamps 0.4.4 first-push batch handling and failure-safe cache saving", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+
+        runInitI18n([], cwd);
+
+        type Step = { name?: string; uses?: string; if?: string; run?: string };
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as {
+            jobs: { translate: { steps: Step[] } };
+        };
+        const steps = doc.jobs.translate.steps;
+        const restore = steps.find((s) => s.name === "Restore translation cache");
+        const save = steps.find((s) => s.name === "Save translation cache");
+        const check = steps.find((s) => s.name === "Check translation cache");
+
+        // actions/cache@v4's post-save only runs on success: a completed
+        // translation followed by a failed publish used to lose every cache.
+        expect(restore?.uses).toBe("actions/cache/restore@v4");
+        expect(save?.uses).toBe("actions/cache/save@v4");
+        expect(save?.if).toContain("always()");
+        expect(save?.if).toContain("cache_check.outputs.has_files == 'true'");
+        expect(check?.run).toContain("compgen -G");
+        expect(steps.some((s) => s.uses === "actions/cache@v4")).toBe(false);
+
+        // A brand-new i18n/batch-<run_id> branch must be pushed, not rebased
+        // onto a remote ref that does not exist yet.
+        const batch = steps.find(
+            (s) => s.name === "Self-check & commit to batch branch",
+        );
+        expect(batch?.run).toContain(
+            'git rev-parse --verify "refs/remotes/origin/$BR"',
+        );
+        expect(batch?.run).toContain('git push -u origin "$BR"');
+        expect(batch?.run).toContain("git rebase --abort");
+    });
+
     it("derives the wildcard trigger from --content-root, not from collections", () => {
         const cwd = makeTempDir();
         writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);

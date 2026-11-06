@@ -8,6 +8,49 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.4.4
+
+### 修复
+
+- **译文全部翻完，却一篇都发不出去。** 实测 run `42306899199`：15 个语言各 13 条
+  全部成功、`remap 完成：写入 15 个译文`、落盘路径校验通过；最后
+  `Self-check & commit to batch branch` 报 `推送 batch 分支失败` / `exit 1`，
+  publish 失败并建 issue，15 篇译文随 runner 一起被丢弃。
+  根因：`i18n/batch-<run_id>` 是**每次运行新建**的分支，远端本来就不存在；
+  旧逻辑在重试循环里无条件 `git rebase origin/$BR`，于是 5 次都报
+  `fatal: couldn't find remote ref i18n/batch-...`，永远推不出去。
+- 推送循环改为先判断远端分支是否存在：不存在就 `git push -u` 直接创建；
+  存在才 `git rebase` + `git push --force-with-lease`。并发分片竞争失败时下一轮
+  fetch 后会自动切回 rebase 路径，rebase 失败会 `git rebase --abort` 清理状态。
+  本地用真实 git 仓库实跑「首次创建」与「分支已存在（并发分片）」两种场景均通过。
+- **翻译缓存不再因发布失败而丢失。** `actions/cache@v4` 组合 action 的 post-save
+  只在 job 成功时执行，上述失败会把 `i18n-translations/*.json` 整份丢掉，重跑必须
+  重新付费调用模型。现拆成 `actions/cache/restore@v4` + `actions/cache/save@v4`，
+  save 用 `if: always()`；并先检查目录里确实有 `*.json` 才保存，避免空目录被存成
+  「最近一次缓存」污染 restore-keys。
+- 失败 issue 的排查顺序补充 batch 分支首次推送特征与缓存恢复办法。
+
+### 翻译缓存在哪里 / 如何处理
+
+- 三份副本：① run 内工作目录 `i18n-translations/`（runner 销毁即消失）；
+  ② GitHub Actions cache（0.4.4 起失败也保存；7 天未访问会被清理、10GB 按 LRU 淘汰）；
+  ③ 每分片 artifact `translation-logs-<run_id>-<shard>`（`if: always()`，
+  默认保留 90 天，**发布失败也一定在**）。
+- 本次 run `42306899199`：日志开头 `Cache not found`、结尾没有 `Cache saved`，
+  所以 ② 里没有；但 artifact `translation-logs-42306899199-0`（16 文件 / 28.7 KB）
+  已上传成功，15 个 `<lang>.json` 都在里面。
+- 恢复：下载该 artifact → 把 `*.json` 放进仓库根目录 `i18n-translations/` →
+  重跑工作流（或 Actions → i18n-translate → Run workflow 勾 force）。命中缓存时
+  几乎不调用模型，即可重建并发布 15 篇译文。
+- 不建议默认把缓存提交进仓库：每次翻译都会多出 15 个 JSON 的 diff；只有需要
+  跨 Actions 缓存淘汰周期永久留存时才这么做。
+
+### 迁移
+
+- 每个消费方仓库重跑 `pnpm exec astro-sveltia-pages init:i18n` 并提交重新生成的
+  三份文件（模板版本 `0.4.4`）。Secret、CMS 配置、frontmatter 都不用改。
+- 升级后建议手动触发一次 `Run workflow`（勾 force）把上次未发布的译文补发。
+
 ## 0.4.3
 
 ### 修复

@@ -50,6 +50,24 @@
 # 5) 存量站引导：到 Actions → i18n-translate → Run workflow，勾 force 并填
 #    scope 正则分批回填；只有打开开关的 EN 文件才会进入清单。
 #
+# ── 翻译缓存（i18n-translations/<lang>.json，别当普通日志删掉）─────────────
+#   pelikhan 的增量完全依赖这份「源片段 → 译文」字典：源文本没变就不调用模型、
+#   不重复计费。它有三份副本，可靠性依次递增：
+#     ① 工作目录 i18n-translations/ —— 只在本次 CI run 内存在，runner 销毁即消失；
+#     ② GitHub Actions cache（key i18n-<os>-<shard>-<run_id>，restore-keys 回退到
+#        同分片最近一次）—— 0.4.4 起拆成 restore + 显式 save，并用 always()
+#        保证「翻译成功但发布失败」时也保存，重跑不必重新付费调用模型；
+#     ③ 每分片上传的 artifact translation-logs-<run_id>-<shard> —— if: always()，
+#        失败也一定在，里面就是各语言的 <lang>.json（+ usage.jsonl），默认保留 90 天。
+#   排查「缓存还在吗」：看 translate 日志开头的 Cache not found / Cache restored，
+#   以及结尾有没有 Cache saved；没有 Cache saved 就去该 run 页面下载 ③。
+#   恢复办法：把 ③ 解压出的 *.json 放进仓库根目录 i18n-translations/ 后重跑，
+#   或在 Actions → i18n-translate → Run workflow 勾 force 重跑（命中缓存时几乎不花 token）。
+#   ⚠️ Actions cache 7 天未访问会被清理、总配额 10GB 按 LRU 淘汰；只有需要永久
+#   留存时才把 i18n-translations/ 提交进仓库，但每次翻译都会多出 15 个 JSON 的 diff，
+#   因此默认不这么做。
+# ───────────────────────────────────────────────────────────────────
+#
 # ── API 凭证（仓库 Settings → Secrets and variables → Actions → New repository secret）──
 #   默认走 DeepSeek（OpenAI 兼容端点）：
 #     • DEEPSEEK_API_KEY —— DeepSeek API Key（sk- 开头）。
@@ -77,6 +95,13 @@
 #      只把缺失语言清空缓存后单独重跑一次；③ 重试后仍缺失才按
 #      ALLOW_PARTIAL_TRANSLATIONS 决定是告警发布还是终止；④ 落盘后逐条
 #      校验译文确实位于 <content_root>/<collection>/<lang>/<slug>.md。
+#
+#   ⚠️ 0.4.4 修复（译文全部翻完却发不出去）：`i18n/batch-<run_id>` 首次运行时
+#      远端根本没有这条分支，旧逻辑在重试循环里无条件 `git rebase origin/$BR`
+#      → "fatal: couldn't find remote ref" ×5 → `推送 batch 分支失败` → publish
+#      失败并建 issue，15 篇已完成的译文全丢。现在先判断远端分支是否存在：
+#      不存在就直接 `git push -u`；并发分片竞争失败时下一轮 fetch 后会自动
+#      切回 rebase + force-with-lease，无需人工干预。
 # ───────────────────────────────────────────────────────────────────
 
 name: i18n-translate
@@ -378,8 +403,12 @@ jobs:
 
             # (修复 0.3.5) 缓存 pelikhan 真正的增量缓存目录 translations/<lang>.json，
             # 而不是旧模板里那个 root 拥有、且根本没被使用的 .genaiscript/cache。
+            # (修复 0.4.4) 拆成 restore + 显式 save：actions/cache@v4 的 post-save
+            # 只在 job 成功时执行，翻译全完成但发布失败时会把整份增量缓存丢掉，
+            # 重跑必须重新付费调用模型。save 步骤用 always() 保证失败也落盘。
             - name: Restore translation cache
-              uses: actions/cache@v4
+              id: cache
+              uses: actions/cache/restore@v4
               with:
                   path: i18n-translations
                   # (修复 0.3.6) 分片号必须同时出现在 key 与 restore-keys 前缀里。
@@ -735,16 +764,30 @@ jobs:
                   fi
                   git config user.name "i18n-bot"
                   git config user.email "i18n-bot@users.noreply.github.com"
-                  git fetch origin "$BR" || true
+                  git fetch origin "$BR" 2>/dev/null || true
                   git checkout -B "$BR" "origin/$BR" 2>/dev/null || git checkout -b "$BR"
                   git commit -m "i18n: shard ${{ matrix.i }} (EN → ${{ env.TARGET_LANGS }})"
                   ok=0
                   for n in 1 2 3 4 5; do
-                    git fetch origin "$BR" || true
-                    if git rebase "origin/$BR" >/dev/null 2>&1 && git push --force-with-lease origin "$BR"; then ok=1; break; fi
+                    git fetch origin "$BR" 2>/dev/null || true
+                    if git rev-parse --verify "refs/remotes/origin/$BR" >/dev/null 2>&1; then
+                      # 远端已有该分片分支（其它分片先推过，或本轮重试已推过）：
+                      # 变基后带 lease 强推，避免并发分片互相覆盖。
+                      if git rebase "origin/$BR" >/dev/null 2>&1 && git push --force-with-lease origin "$BR"; then ok=1; break; fi
+                      git rebase --abort 2>/dev/null || true
+                    elif git push -u origin "$BR"; then
+                      # (修复 0.4.4) 首次运行：远端还没有 i18n/batch-<run_id>。
+                      # 旧逻辑无条件 `git rebase origin/$BR` →
+                      # "fatal: couldn't find remote ref" ×5 → 译文翻完却发不出去。
+                      ok=1; break
+                    fi
                     sleep 4
                   done
-                  if [ "$ok" -ne 1 ]; then echo "::error::推送 batch 分支失败"; exit 1; fi
+                  if [ "$ok" -ne 1 ]; then
+                    echo "::error::推送 batch 分支失败：$BR（5 次重试均失败）。"
+                    echo "::error::译文缓存已由 Save translation cache 与 translation-logs artifact 保留，重跑不会重复调用模型。"
+                    exit 1
+                  fi
 
             # (修复 0.3.5) 清理由 root 创建的临时目录；用 sudo 兜底，且不再执行
             # 会触发 Permission denied 的 mkdir。
@@ -753,7 +796,29 @@ jobs:
               run: |
                   sudo rm -rf "$STAGING_DIR" .genaiscript 2>/dev/null || rm -rf "$STAGING_DIR" .genaiscript 2>/dev/null || true
 
-            # 调试日志（每分片留存，便于排查未完成的 (locale, file)）
+            # (修复 0.4.4) 无论发布成功与否，都把本次增量缓存写回 Actions cache。
+            # 只在目录里确实有 <lang>.json 时保存：空目录若被存成"最近一次缓存"，
+            # 下一次 restore-keys 会命中它，造成"缓存已恢复"的假象、重复计费。
+            - name: Check translation cache
+              id: cache_check
+              if: always()
+              run: |
+                  if compgen -G "$TRANSLATIONS_DIR/*.json" > /dev/null; then
+                    echo "has_files=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "has_files=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Save translation cache
+              if: always() && steps.cache.outputs.cache-hit != 'true' && steps.cache_check.outputs.has_files == 'true'
+              continue-on-error: true
+              uses: actions/cache/save@v4
+              with:
+                  path: i18n-translations
+                  key: i18n-${{ runner.os }}-${{ matrix.i }}-${{ github.run_id }}
+
+            # 调试日志 artifact：if: always()，发布失败时这里就是译文缓存的兜底副本，
+            # 解压出的 *.json 放回 i18n-translations/ 即可免模型调用重建译文。
             - uses: actions/upload-artifact@v4
               if: always()
               with:
@@ -794,7 +859,7 @@ jobs:
               if: needs.translate.result != 'success'
               run: |
                   echo "::error::翻译分片未成功完成（translate result: ${{ needs.translate.result }}），没有译文被发布。"
-                  echo "请打开 translate 分片的日志，重点看 Verify translations were produced、Retry missing languages once 与 Verify destination layout 步骤。"
+                  echo "请打开 translate 分片的日志，重点看 Verify translations were produced、Retry missing languages once、Verify destination layout 与 Self-check & commit to batch branch 步骤。"
                   exit 1
 
             # 发布方式：commit（默认）直接合并到 main 并推送
@@ -855,7 +920,13 @@ jobs:
                         '4. Verify translations were produced 的缺失清单（文件→语言）与 Retry missing languages once；',
                         '   若日志里出现 ┌T000┐ 被原样抄回 / "No translations found"，说明模型没按代码围栏格式输出（0.4.2 已加强 instructions 并在清缓存后重试）。',
                         '5. Verify destination layout：译文必须位于 <content_root>/<collection>/<lang>/<slug>.md。',
-                        '6. DEEPSEEK_API_KEY 余额、No files or not matching languages selected.（源文件路径/暂存目录问题）。'
+                        '6. DEEPSEEK_API_KEY 余额、No files or not matching languages selected.（源文件路径/暂存目录问题）。',
+                        '7. Self-check & commit to batch branch：若报「推送 batch 分支失败」并反复出现',
+                        '   "fatal: couldn\'t find remote ref"，说明用的是 0.4.3 及更早模板（首次创建 batch',
+                        '   分支时无条件 rebase 一个还不存在的远端 ref）：升级 0.4.4 并重跑 init:i18n。',
+                        '8. 译文缓存：0.4.4 起 Save translation cache 用 always() 保存，发布失败也不丢；',
+                        '   兜底副本在 artifact translation-logs-<run_id>-<shard>，把解压出的 *.json 放回',
+                        '   i18n-translations/ 后重跑，可免模型调用直接重建译文。'
                       ].join('\n');
                       await github.rest.issues.create({
                         owner: context.repo.owner,

@@ -212,6 +212,16 @@ async function buildI18nTemplates() {
             "const firstPush = before !== '' && /^0+$/.test(before);",
             "first-push (all-zero before sha) fallback (0.4.3)",
         ],
+        [
+            "actions/cache/restore@v4",
+            "restore/save split so a failed publish keeps the cache (0.4.4)",
+        ],
+        ["actions/cache/save@v4", "explicit always() cache save (0.4.4)"],
+        [
+            'git rev-parse --verify "refs/remotes/origin/$BR"',
+            "branch-exists check before rebasing (0.4.4)",
+        ],
+        ['git push -u origin "$BR"', "first push of a brand-new batch branch (0.4.4)"],
         ["Fail when translation did not succeed", "publish-side failure gate"],
         ["filename_template:", "explicit translation filename template"],
         [
@@ -266,6 +276,15 @@ async function buildI18nTemplates() {
     ) {
         throw new Error(
             "i18n workflow template still contains a known-broken 0.3.4 construct.",
+        );
+    }
+
+    // The combined actions/cache@v4 saves its cache in a post step that only
+    // runs on successful jobs: a completed translation followed by a failed
+    // publish loses the whole incremental cache and pays for the model again.
+    if (/\buses:\s*actions\/cache@v4\b/.test(workflow)) {
+        throw new Error(
+            "i18n workflow must not use the combined actions/cache@v4; use actions/cache/restore@v4 + actions/cache/save@v4 with always().",
         );
     }
 

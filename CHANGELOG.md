@@ -10,6 +10,62 @@ section below.
 
 ---
 
+## 0.4.4
+
+### Fixed
+
+- **All 15 locales were translated, then every one of them was lost.** In run
+  `42306899199` each locale produced 13/13 strings, `remap` wrote 15 files and
+  the destination-layout check passed; the final `Self-check & commit to batch
+branch` step failed with "push batch branch failed" / `exit 1`, `publish`
+  failed and opened an issue, and the 15 translations died with the runner.
+  Root cause: `i18n/batch-<run_id>` is a **brand-new** branch on every run. The
+  retry loop always called `git rebase origin/$BR`, which does not exist yet, so
+  all 5 attempts produced `fatal: couldn't find remote ref i18n/batch-...`.
+- The loop now checks whether the remote branch exists: if not, it uses
+  `git push -u` to create it; otherwise it rebases and pushes with
+  `--force-with-lease`. A shard that loses the first-push race switches to the
+  rebase path on its next `fetch`, and a failed rebase is cleaned up with
+  `git rebase --abort`. Both the "first run" and "branch already exists
+  (concurrent shard)" cases were exercised against a real local git remote.
+- **The incremental translation cache no longer disappears on a failed
+  publish.** The combined `actions/cache@v4` saves only in a post step that runs
+  on successful jobs, so the failure above discarded every
+  `i18n-translations/<lang>.json` and a rerun would pay for the model again.
+  It is now split into `actions/cache/restore@v4` + `actions/cache/save@v4`
+  with `if: always()`. A guard step only saves when `*.json` files actually
+  exist, so an empty directory can never become the "most recent cache" and
+  poison `restore-keys`.
+- The failure issue now names the first-push symptom and the cache recovery
+  path.
+
+### Where the translation cache lives / how to handle it
+
+- Three copies: (1) the run's working directory `i18n-translations/` (gone when
+  the runner is destroyed); (2) GitHub Actions cache (0.4.4 saves it even on
+  failure; entries unused for 7 days are evicted, 10 GB total, LRU); (3) the
+  per-shard artifact `translation-logs-<run_id>-<shard>` uploaded with
+  `if: always()` — always present after a failure, retained 90 days by default.
+- For run `42306899199`: the log starts with `Cache not found` and has no
+  `Cache saved` at the end, so (2) is empty. But artifact
+  `translation-logs-42306899199-0` (16 files / 28.7 KB) uploaded successfully
+  and contains all 15 `<lang>.json` files.
+- To recover: download that artifact, put the `*.json` files into
+  `i18n-translations/` at the repo root, then rerun the workflow (or use
+  Actions → i18n-translate → Run workflow with `force`). With the cache hit,
+  the 15 translations are rebuilt and published with virtually no model calls.
+- Do not commit the cache directory by default: every translation would add 15
+  JSON diffs. Only do it if you need persistence beyond the Actions cache
+  eviction window.
+
+### Migration
+
+- Re-run `pnpm exec astro-sveltia-pages init:i18n` in every consumer repo and
+  commit the three regenerated files (template `0.4.4`). No Secret, CMS config
+  or frontmatter changes are needed.
+- After upgrading, trigger `Run workflow` once with `force` to publish the
+  translations that the previous failed run could not deliver.
+
 ## 0.4.3
 
 ### Fixed
