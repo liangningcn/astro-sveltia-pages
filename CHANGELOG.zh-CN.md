@@ -8,6 +8,52 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.4.0
+
+### 破坏性变更
+
+- **是否翻译改为「每篇 md 自带开关」，不再按集合判断。** 工作流完全不再解析
+  CMS 集合：`on.push.paths` 改成一条通配 `<content-root>/**/en/**`，覆盖所有
+  集合；detect 只保留 frontmatter 里写了 `autoTranslate: true` 的 EN 文件。
+  没打开开关的 EN 变更就是普通修改，不触发翻译；修改其它语言版本的文件
+  永远不触发工作流，后台人工改译文是安全的。
+- 生成的工作流不再有 `env.SKIP_COLLECTIONS`，CLI 的 `--collections` /
+  `--skip-collections` 参数一并移除。集合也不再需要配置
+  `i18n: { save_all_locales: false, ... }`。
+- **默认值反转为 opt-in**：0.3.x 里用 `autoTranslate: false` 关闭翻译的文件，
+  现在必须把值改成 `true` 才会送翻。
+
+### 新增
+
+- `env.OVERWRITE_MODE`：`all`（默认）在开关打开的文章每次 EN 变更时覆盖已有
+  译文；`missing` 只补写尚不存在的译文。
+- 译文文件 frontmatter 里写 `translateLock: true`，则两种模式下都永不覆盖，
+  该语言版本交回 CMS 后台独占维护。
+- detect 为每个被跳过的 EN 文件打印具体原因（未开开关 / 草稿 / 模板），并在
+  零文件时用 `::warning::` 输出各类计数，不再静默。
+
+### 修复
+
+- 0.3.7 / 0.3.8 那一整类集合解析 bug 彻底消失：`media_folder:` 幽灵条目、
+  待翻译集合名泄漏进排除列表、末尾全局 `i18n` 块或注释里的
+  `initial_locales` 把最后一个集合误判。CLI 里已经没有集合解析代码。
+
+### 迁移
+
+1. 升级后在每个消费方仓库重跑 `pnpm exec astro-sveltia-pages init:i18n`，
+   并提交重新生成的三份文件（模板版本 `0.4.0`）。
+2. 给每个 CMS 集合的 `fields` 加一个开关字段，并写进 `_template.md`
+   让新建文章默认关闭：
+   `{ label: '自动翻译', name: 'autoTranslate', widget: 'boolean', default: false, i18n: 'duplicate' }`。
+3. 存量 EN 文件**默认不会被翻译**，只有显式设了 `autoTranslate: true` 才会。
+   不要一次性给全仓库打开开关；用 `workflow_dispatch` + `force` + `scope`
+   分批回填。
+4. 若某些语言版本是人工维护的，把 `OVERWRITE_MODE` 设为 `"missing"`，或给
+   这些译文加 `translateLock: true`。否则开关打开的文章每次 EN 变更都会
+   重新生成并覆盖全部目标语言。
+
+---
+
 ## 0.3.7
 
 ### 修复

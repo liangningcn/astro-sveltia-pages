@@ -379,7 +379,8 @@ export const collections = {
         ```
 
         它会自动探测 `sveltia-cms.config.mjs`（可用 `--config <path>` 覆盖），读取
-        `i18n.default_locale`、`i18n.locales` 与各集合的 `folder`，填充模板占位符，并写出三份文件：
+        `i18n.default_locale`、`i18n.locales` 与 `i18n.structure`，填充模板占位符，
+        并写出三份文件（0.4.0 起**不再解析集合**，是否翻译由每篇 md 的 frontmatter 决定）：
 
         - `.github/workflows/i18n-translate.yml`
         - `i18n/glossary.md`
@@ -390,8 +391,6 @@ export const collections = {
         - `--content-root <path>` — 内容根目录（默认 `src/content`）
         - `--default-locale <lang>` — 源语言（默认 `en`）
         - `--project-name <name>` — 用于术语表标题
-        - `--collections <a,b,c>` — 仅接入指定集合
-        - `--skip-collections <a,b>` — 始终排除这些集合
         - `--force` — 覆盖已存在的文件
         - `--check` — 只校验生成文件是否为最新版本（过期则非零退出，可用于 CI）
 
@@ -420,20 +419,34 @@ export const collections = {
       <https://platform.deepseek.com>。工作流会调用 DeepSeek 的 OpenAI 兼容端点
       `https://api.deepseek.com`，使用 `deepseek-flash`（旧名 `deepseek-v4-flash` 已退役）。
 
-3.  在 Sveltia CMS 配置中，**每个需要自动翻译的集合都必须设置**：
+3.  给 Sveltia CMS 的**每个集合**加一个「自动翻译」开关（并写进 `_template.md`，
+    让新建文章默认关闭）：
 
     ```js
-    i18n: { save_all_locales: false, initial_locales: ["en"] }
+    { label: '自动翻译', name: 'autoTranslate', widget: 'boolean',
+      default: false, i18n: 'duplicate' }
     ```
 
-    这样 CMS 只会提交英文源文件，其余语言由 CI 生成。同时把不可翻译字段（`slug`、图片路径等）标记为
-    `i18n: duplicate`，并确保 backend **不要**设置 `skip_ci: true`。
+    **开关语义（0.4.0 起）**：
+
+    - EN 文件 frontmatter 里 `autoTranslate: true` → 送翻，并覆盖全部目标语言译文；
+    - 不写 / `false` → 普通修改，CI 完全不碰这篇文章；
+    - 修改其它语言版本（`fr` / `de` / …）的文件 → 永远不触发工作流，后台可随意改。
+
+    工作流用 `on.push.paths: <content-root>/**/en/**` 一条通配覆盖所有集合，
+    不再按集合区分，所以产品、博客、页面一视同仁。不可翻译字段（`slug`、
+    图片路径等）仍标记 `i18n: duplicate`，backend **不要**设置 `skip_ci: true`。
+
+    > **保护人工译文**：默认 `OVERWRITE_MODE: "all"`，开关打开的文章每次 EN
+    > 变更都会重新生成并覆盖全部译文。若要保留后台改过的译文，把工作流里的
+    > `OVERWRITE_MODE` 改为 `"missing"`（只补写尚不存在的译文），或在某个译文
+    > 文件的 frontmatter 里加 `translateLock: true`（该语言版本永不覆盖）。
 
 4.  ⚠️ **提交信息规则（重要）：** 提交信息里绝对不能出现方括号包裹的 CI 跳过标记，如 `[skip ci]` / `[ci skip]` / `skip-checks`。在 GitHub Actions + Cloudflare Pages 上，这类标记会让整次 push 的工作流 **和** Cloudflare 部署一起被跳过，导致翻译推送（或任何部署）静默不执行。
 
-5.  向 `main` 推送一个英文源文件（例如 `src/content/blog/en/my-post.md`）即会触发 `i18n-translate`：它会把变更翻译成全部目标语言，自检通过后提交回 `main`（`PUBLISH_MODE: "commit"`）。若想保留人工合并闸门，可在生成的工作流中把 `PUBLISH_MODE` 改为 `"pr"`。英文源会立即上线，其余语言在同一次后续提交中一起发布。自 0.3.5 起，若一篇译文都没产出，工作流会**显式失败并自动建 issue**，不再出现"全绿但没翻译"。
+5.  向 `main` 推送一个**打开了 `autoTranslate: true`** 的 EN 文件（例如 `src/content/blog/en/my-post.md`）即会触发 `i18n-translate`：它会把变更翻译成全部目标语言，自检通过后提交回 `main`（`PUBLISH_MODE: "commit"`）。没打开开关的 EN 变更只是普通修改，detect 会打印跳过原因、`translate` / `publish` 显示 Skipped。若想保留人工合并闸门，可在生成的工作流中把 `PUBLISH_MODE` 改为 `"pr"`。英文源会立即上线，其余语言在同一次后续提交中一起发布。自 0.3.5 起，若一篇译文都没产出，工作流会**显式失败并自动建 issue**，不再出现"全绿但没翻译"。
 
-> **增量与存量回填：** 工作流通过 `actions/cache` 缓存 pelikhan 的逐语言翻译缓存（`i18n-translations/<lang>.json`），重跑只会重新翻译发生变化的节点。注意 pelikhan 是从英文源 + 该缓存**重新生成**译文文件，并**不读取**已存在的译文 Markdown，因此人工修改过的译文在下一次英文源变更时会被覆盖。若要为已填充的存量站点引导翻译，可手动运行工作流（`workflow_dispatch`），勾选 `force` 并填写 `scope` 正则（如 `posts`）。
+> **增量与存量回填：** 工作流通过 `actions/cache` 缓存 pelikhan 的逐语言翻译缓存（`i18n-translations/<lang>.json`），重跑只会重新翻译发生变化的节点 —— 这省的是 API 调用，**写回时仍是整篇重新生成**。pelikhan 并不读取已存在的译文 Markdown，因此 `OVERWRITE_MODE: "all"` 下人工修改过的译文会被覆盖（用 `translateLock: true` 或 `"missing"` 模式保护）。若要为已填充的存量站点引导翻译，先给目标 EN 文件打开 `autoTranslate: true`，再手动运行工作流（`workflow_dispatch`），勾选 `force` 并填写 `scope` 正则（如 `posts`）分批回填；只有打开开关的文件会进入清单。
 
 ### 只读模式
 

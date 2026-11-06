@@ -53,14 +53,19 @@ describe("i18n workflow templates", () => {
         for (const token of [
             "__TEMPLATE_VERSION__",
             "__CONTENT_ROOT__",
-            "__COLLECTION_EN_PATH__",
+            "__CONTENT_ROOT__/**/en/**",
             "__TARGET_LANGS__",
             "__CONFIG_FILE__",
-            "__SKIP_COLLECTIONS__",
             "__I18N_STRUCTURE__",
         ]) {
             expect(content).toContain(token);
         }
+
+        // 0.4.0: per-file frontmatter flag replaces collection parsing.
+        expect(content).toContain("autoTranslate: true");
+        expect(content).toContain("OVERWRITE_MODE");
+        expect(content).not.toContain("SKIP_COLLECTIONS");
+        expect(content).not.toContain("__COLLECTION_EN_PATH__");
     });
 
     it("every i18n template carries the version marker placeholder", () => {

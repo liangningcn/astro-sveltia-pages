@@ -325,65 +325,6 @@ function extractStructure(text: string): string {
     return match ? match[1] : "multiple_folders";
 }
 
-type I18nCollection = { name: string; folder: string; translated: boolean };
-
-/**
- * Extracts content collections from a Sveltia CMS config. A collection is
- * considered "translated" (and thus wired into the workflow) when its block
- * declares `save_all_locales: false`, `initial_locales`, or a
- * `multiple_folders` structure — the Sveltia settings that make CI-driven
- * per-locale translation safe.
- */
-function extractCollections(text: string): I18nCollection[] {
-    const result: I18nCollection[] = [];
-    const folderRe = /folder:\s*['"]([^'"]+)['"]/g;
-    const matches: { value: string; index: number }[] = [];
-    let match: RegExpExecArray | null;
-
-    while ((match = folderRe.exec(text)) !== null) {
-        matches.push({ value: match[1], index: match.index ?? 0 });
-    }
-
-    for (let index = 0; index < matches.length; index += 1) {
-        const segmentEnd =
-            index + 1 < matches.length ? matches[index + 1].index : text.length;
-        const segment = text.slice(matches[index].index, segmentEnd);
-
-        // Walk backwards a little to find the nearest `name:` for this collection.
-        const before = text.slice(
-            Math.max(0, matches[index].index - 600),
-            matches[index].index,
-        );
-        const nameMatches = [...before.matchAll(/name:\s*['"]([\w-]+)['"]/g)];
-        const name =
-            nameMatches.length > 0
-                ? nameMatches[nameMatches.length - 1][1]
-                : matches[index].value;
-
-        const translated =
-            /save_all_locales:\s*false/.test(segment) ||
-            /initial_locales/.test(segment) ||
-            /structure:\s*['"]multiple_folders['"]/.test(segment);
-
-        result.push({ name, folder: matches[index].value, translated });
-    }
-
-    return result;
-}
-
-/** Builds the `on.push.paths` entry for a collection's English source folder. */
-function collectionEnPath(contentRoot: string, folder: string): string {
-    let relative = folder;
-
-    if (relative.startsWith(`${contentRoot}/`)) {
-        relative = relative.slice(contentRoot.length + 1);
-    } else if (relative.startsWith(contentRoot)) {
-        relative = relative.slice(contentRoot.length);
-    }
-
-    return `${contentRoot}/${relative}/en/**`;
-}
-
 function deriveProjectName(cwd: string): string {
     try {
         const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
@@ -433,8 +374,6 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
     const contentRoot = readArgValue(args, "--content-root") ?? "src/content";
     const requestedDefaultLocale = readArgValue(args, "--default-locale") ?? "en";
     const projectName = readArgValue(args, "--project-name") ?? deriveProjectName(cwd);
-    const skipArg = readArgValue(args, "--skip-collections");
-    const collectionsArg = readArgValue(args, "--collections");
 
     const configPath = readI18nConfigPath(cwd, configArg);
     const configRelative = relative(cwd, configPath) || "sveltia-cms.config.mjs";
@@ -460,66 +399,19 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
         );
     }
 
-    let collections = extractCollections(configText);
-
-    if (collectionsArg) {
-        const wanted = collectionsArg
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean);
-        const matched = collections.filter(
-            (collection) =>
-                wanted.includes(collection.name) || wanted.includes(collection.folder),
-        );
-        collections =
-            matched.length > 0
-                ? matched
-                : wanted.map((value) => ({
-                      name: value,
-                      folder: value,
-                      translated: true,
-                  }));
-    }
-
-    const translatedCollections = collections.filter(
-        (collection) => collection.translated,
-    );
-
-    if (translatedCollections.length === 0) {
-        fail(
-            "未发现可翻译的集合（集合需设 i18n.save_all_locales: false）。\n" +
-                "      可用 --collections <name1,name2> 显式指定要翻译的集合。",
-        );
-    }
-
-    const enPaths = translatedCollections.map((collection) =>
-        collectionEnPath(contentRoot, collection.folder),
-    );
-    const translatedFolders = new Set(
-        translatedCollections.map((collection) => collection.folder),
-    );
-    let skipCollections = collections
-        .filter((collection) => !translatedFolders.has(collection.folder))
-        .map((collection) => collection.name);
-    if (skipArg) {
-        skipCollections = skipArg
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean);
-    }
-
-    // Fill the workflow template.
+    // The workflow no longer needs to know which collections exist. GitHub's
+    // `on.push.paths` is a static wildcard over every collection's EN folder,
+    // and the per-file `autoTranslate: true` frontmatter flag decides what is
+    // actually translated. Removing collection parsing also removes the whole
+    // class of SKIP_COLLECTIONS / phantom-folder / trailing-comment bugs.
     const workflowTemplate = readFileSync(
         resolveI18nTemplatePath("i18n-translate.yml"),
         "utf-8",
     );
-    const pathItems = enPaths.map((path) => `- "${path}"`).join("\n            ");
     const workflow = workflowTemplate
-        .replace('- "__COLLECTION_EN_PATH__"', pathItems)
         .replace(/__CONTENT_ROOT__/g, contentRoot)
         .replace(/__TARGET_LANGS__/g, targetLangs.join(","))
         .replace(/__CONFIG_FILE__/g, configRelative)
-        .replace(/__SKIP_COLLECTIONS__/g, skipCollections.join(","))
         .replace(/__I18N_STRUCTURE__/g, structure);
 
     // Fill the glossary template.
@@ -672,12 +564,15 @@ ${LOG_PREFIX} i18n 自动翻译已初始化（模板 ${I18N_TEMPLATE_VERSION}，
 下一步（必做）：
 1. 仓库 Secret（Settings → Secrets and variables → Actions → New repository secret）：
    • DEEPSEEK_API_KEY —— DeepSeek API Key（https://platform.deepseek.com，sk- 开头）。
-2. Sveltia CMS 配置（${configRelative}）每个要翻译的集合必须设置：
-     i18n: { save_all_locales: false, initial_locales: ['${defaultLocale}'] }
-   且 backend 不能配置 skip_ci: true。
+2. 在 Sveltia CMS 的每个集合 fields 里加一个开关（并写进 _template.md）：
+     { label: '自动翻译', name: 'autoTranslate', widget: 'boolean',
+       default: false, i18n: 'duplicate' }
+   并确认 backend 没有配置 skip_ci: true。
 3. ⚠️ 提交信息里绝不能出现方括号包裹的 CI 跳过标记（如 [skip ci] / [ci skip]），
    否则整次 push 的工作流与 CF 部署都会被跳过。
-4. 推送一个 ${defaultLocale} 源文件（如 ${enPaths[0]}）即可触发 i18n-translate。
+4. 在 ${contentRoot}/**/en/** 下发布一个 ${defaultLocale} 文件、并把 frontmatter 的
+   autoTranslate 设为 true，即会触发 i18n-translate；不打开开关就是普通修改。
+   其它语言版本在 CMS 后台随意修改都不会触发工作流。
 5. 每次升级 astro-sveltia-pages 后重跑 \`${I18N_UPGRADE_COMMAND}\`
    （或 \`${I18N_CHECK_COMMAND}\` 在 CI 中拦截过期模板）。
 `);
@@ -687,7 +582,7 @@ const CLI_USAGE = `
 ${LOG_PREFIX} Usage:
   astro-sveltia-pages init [--platform cloudflare|edgeone] [--site-url <url>]
   astro-sveltia-pages init:i18n [--config <path>] [--content-root <path>]
-                                [--collections <a,b>] [--skip-collections <a,b>]
+                                [--default-locale <lang>] [--project-name <name>]
                                 [--force] [--check]
   astro-sveltia-pages --help
 

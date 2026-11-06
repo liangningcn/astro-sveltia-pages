@@ -92,38 +92,25 @@ describe("init:i18n — first run", () => {
         expect(doc.env.CONTENT_ROOT).toBe("src/content");
         expect(doc.env.CONFIG_FILE).toBe("sveltia-cms.config.mjs");
 
-        // Only the translated collection is wired into the push trigger.
-        expect(doc.on.push.paths).toEqual(["src/content/blog/en/**"]);
-
-        // The non-translated collection is listed as a skip target.
-        expect(doc.env.SKIP_COLLECTIONS).toBe("authors");
+        // 0.4.0: one wildcard covers every collection; the per-file flag decides.
+        expect(doc.on.push.paths).toEqual(["src/content/**/en/**"]);
+        expect(doc.env.SKIP_COLLECTIONS).toBeUndefined();
+        expect(doc.env.OVERWRITE_MODE).toBe("all");
 
         // Glossary placeholder was replaced.
         const glossary = readFileSync(glossaryPath, "utf-8");
         expect(glossary).not.toContain("__PROJECT_NAME__");
     });
 
-    it("derives the EN path from a full folder path", () => {
+    it("derives the wildcard trigger from --content-root, not from collections", () => {
         const cwd = makeTempDir();
-        writeFileSync(
-            join(cwd, "sveltia-cms.config.mjs"),
-            `export default {
-  i18n: { default_locale: 'en', locales: [{ locale: 'en' }, { locale: 'es' }] },
-  collections: [
-    { name: 'docs', folder: 'src/content/docs', i18n: { save_all_locales: false, initial_locales: ['en'] } },
-  ],
-};
-`,
-        );
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
 
-        runInitI18n([], cwd);
+        runInitI18n(["--content-root", "content/posts"], cwd);
 
-        const workflow = readFileSync(
-            join(cwd, ".github", "workflows", "i18n-translate.yml"),
-            "utf-8",
-        );
-        const doc = jsYaml.load(workflow) as YamlDoc;
-        expect(doc.on.push.paths).toEqual(["src/content/docs/en/**"]);
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        expect(doc.on.push.paths).toEqual(["content/posts/**/en/**"]);
+        expect(doc.env.CONTENT_ROOT).toBe("content/posts");
     });
 });
 
@@ -211,7 +198,7 @@ describe("init:i18n — locale parsing regression (0.3.5)", () => {
         );
         const doc = jsYaml.load(workflow) as YamlDoc;
         expect(doc.env.TARGET_LANGS).toBe("de,fr,ja");
-        expect(doc.on.push.paths).toEqual(["src/content/blog/en/**"]);
+        expect(doc.on.push.paths).toEqual(["src/content/**/en/**"]);
     });
 
     it("parses a single-line inline i18n config (real-world shape)", () => {
@@ -453,6 +440,81 @@ describe("init:i18n — template version stamping & upgrade (0.3.5)", () => {
         } finally {
             console_.restore();
         }
+    });
+});
+
+// 0.4.0: the CLI no longer parses CMS collections at all. Whether a file is
+// translated is decided by its own `autoTranslate: true` frontmatter flag, so
+// none of the 0.3.7/0.3.8 collection-parsing hazards can recur.
+describe("init:i18n — frontmatter opt-in (0.4.0)", () => {
+    const TRICKY_CONFIG = `export const collections = [
+  { name: 'products', folder: 'src/content/products', media_folder: 'public/img', public_folder: '/img' },
+  { name: 'blog', folder: 'src/content/blog', i18n: { save_all_locales: false, initial_locales: ['en'] } },
+  { name: 'terms', folder: 'src/content/terms', i18n: true },
+];
+export default {
+  // 注释里提到 initial_locales: ['en']，不应被当成配置。
+  i18n: { structure: 'multiple_folders', default_locale: 'en', locales: ['en', 'fr', 'de'] },
+};
+`;
+
+    it("generates a collection-agnostic workflow from any CMS config shape", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), TRICKY_CONFIG);
+
+        runInitI18n([], cwd);
+
+        const workflow = readFileSync(workflowPath(cwd), "utf-8");
+        const doc = jsYaml.load(workflow) as YamlDoc;
+
+        expect(doc.on.push.paths).toEqual(["src/content/**/en/**"]);
+        expect(doc.env.SKIP_COLLECTIONS).toBeUndefined();
+        expect(doc.env.TARGET_LANGS).toBe("de,fr");
+        expect(workflow).not.toContain("__SKIP_COLLECTIONS__");
+    });
+
+    it("detect only keeps EN files whose frontmatter enables autoTranslate", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+
+        runInitI18n([], cwd);
+
+        const workflow = readFileSync(workflowPath(cwd), "utf-8");
+        expect(workflow).toContain("/^autoTranslate:\\s*true\\s*$/m");
+        expect(workflow).toContain("未开启 autoTranslate: true");
+        expect(workflow).not.toContain("autoTranslate:\\s*false");
+        expect(workflow).not.toContain("SKIP_COLLECTIONS");
+    });
+
+    it("remap honours OVERWRITE_MODE and per-locale translateLock", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), TRICKY_CONFIG);
+
+        runInitI18n([], cwd);
+
+        const remap = readFileSync(
+            join(cwd, "scripts", "remap-translations.sh"),
+            "utf-8",
+        );
+        expect(remap).toContain('OVERWRITE_MODE="${OVERWRITE_MODE:-all}"');
+        expect(remap).toContain("translateLock");
+        expect(remap).toContain("handled=$((moved + skipped))");
+    });
+
+    it("legacy --collections / --skip-collections args no longer change output", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), TRICKY_CONFIG);
+        const console_ = captureConsole();
+
+        try {
+            runInitI18n(["--collections", "products,blog"], cwd);
+            expect(console_.error.join("\n")).not.toContain("⚠️");
+        } finally {
+            console_.restore();
+        }
+
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        expect(doc.on.push.paths).toEqual(["src/content/**/en/**"]);
     });
 });
 

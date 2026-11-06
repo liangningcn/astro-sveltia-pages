@@ -12,30 +12,37 @@
 #
 # 方案: 复用 pelikhan/action-continuous-translation@v0.2.11 作为翻译引擎（DeepSeek 驱动）。
 #
-# 目标: Sveltia CMS 编辑只维护英文源文件；本工作流在 EN 源变更时，
-#       增量翻译为目标语言，并"自检通过后直接发布到 main"（无需 CMS 二次操作）。
-#       通过 env.PUBLISH_MODE 可切换为开 PR 待人工合并。
+# 目标: 由【每篇 EN md 的 frontmatter 开关】决定是否自动翻译，与集合无关。
+#       CMS 后台编辑产品 / 博客 / 任何语言版本都不会误触发；只有 EN 文件里
+#       显式写了 `autoTranslate: true` 才会被送翻并覆盖目标语言译文。
+#       译文自检通过后直接发布到 main（PUBLISH_MODE 可改为开 PR 人工复核）。
 #
 # ⚠️ 已知坑（务必遵守，否则整次 push 的工作流 / CF 部署都会被跳过）：
 #   提交信息里绝不能出现 CI 跳过标记：如 [skip ci] / [ci skip] / skip-checks 等
 #   被方括号包裹的 skip ci / ci skip 写法。Sveltia 的 backend 也不能配置 skip_ci:true。
 #
 # ── 接入说明 ───────────────────────────────────────────────────────────
-# 1) Sveltia 侧（关键，CMS 配置里必须做）：
-#      i18n:
-#        structure: __I18N_STRUCTURE__
-#        default_locale: en
-#      每个"需要 CI 翻译"的集合必须设：
-#        i18n: { save_all_locales: false, initial_locales: ["en"] }
-#      ← 让 CMS 只提交 en 文件，CI 负责其余语言（否则会一次生成一堆空壳译文）。
-#      把 slug / 图片路径等"不可翻译字段"标记为 `i18n: duplicate`，
-#      它们会被原样复制、永不被送翻。
-# 2) 不触发翻译：单篇在 frontmatter 设 `autoTranslate: false`；
-#    全局暂停：把本文件 env.AUTO_TRANSLATE 改为 "false"。
-#    自动排除：草稿（frontmatter draft:true）、模板文件（_template.md / templates 目录）
-#    在检测阶段即跳过（这些条目仍以英文发布，只是不送翻）。
-# 3) 存量站引导：已存在的 EN 文件不会自动翻译。到 Actions → i18n-translate →
-#    Run workflow，勾选 force 并填 scope（如 posts）分批翻译；中断重跑会增量续翻已有译文。
+# 1) 触发范围（GitHub 的 on.push.paths 是静态 YAML，读不到 frontmatter）：
+#      监听 `__CONTENT_ROOT__/**/en/**`，即【所有集合】的 EN 文件。
+#      其它语言目录（/fr/ /de/ …）与 CI 自己提交的译文都不在匹配内，
+#      所以后台随意修改译文不会触发工作流，也不会形成回环。
+# 2) 单篇开关（唯一决定是否翻译）：
+#      EN 文件 frontmatter 里 `autoTranslate: true` → 送翻并覆盖目标语言译文；
+#      不写 / false → 普通修改，CI 完全不碰这篇文章。
+#      建议在 Sveltia CMS 每个集合的 fields 里加一个可视化开关：
+#        { label: '自动翻译', name: 'autoTranslate', widget: 'boolean',
+#          default: false, i18n: 'duplicate' }
+#      并写进 _template.md，让新建文章默认关闭。
+#      CMS 的 i18n.structure 仍须为 __I18N_STRUCTURE__；slug / 图片路径等
+#      不可翻译字段标记 `i18n: duplicate`。
+# 3) 保护人工译文（可选，按需使用）：
+#      某个译文文件 frontmatter 里加 `translateLock: true` → 该语言版本
+#      永不覆盖，交给后台独占维护。或把 env.OVERWRITE_MODE 设为 "missing"，
+#      全局只补缺失译文、不碰任何已存在文件。
+# 4) 自动排除：draft:true、_template.md / templates 目录。
+#    全局暂停：env.AUTO_TRANSLATE = "false"。
+# 5) 存量站引导：到 Actions → i18n-translate → Run workflow，勾 force 并填
+#    scope 正则分批回填；只有打开开关的 EN 文件才会进入清单。
 #
 # ── API 凭证（仓库 Settings → Secrets and variables → Actions → New repository secret）──
 #   默认走 DeepSeek（OpenAI 兼容端点）：
@@ -49,12 +56,12 @@ name: i18n-translate
 
 # 引号包裹 `on` 以兼容标准 YAML 解析器（裸 `on:` 在 YAML 1.1 会被视为布尔值）。
 "on":
-    # 只监听"需要翻译的集合"的英文源文件（本模板由 init:i18n 填入对应集合）；
-    # 译文文件不会再次触发，天然避免回环。
+    # 监听所有集合的 EN 源文件；是否翻译由每篇 md 的 frontmatter 开关决定。
+    # 其它语言目录与 CI 提交的译文都不在匹配内，天然避免回环。
     push:
         branches: [main]
         paths:
-            - "__COLLECTION_EN_PATH__"
+            - "__CONTENT_ROOT__/**/en/**"
     workflow_dispatch:
         inputs:
             force:
@@ -88,8 +95,11 @@ env:
     TARGET_LANGS: "__TARGET_LANGS__"
     CONTENT_ROOT: "__CONTENT_ROOT__"
     I18N_STRUCTURE: "__I18N_STRUCTURE__"
-    # 不翻译的集合（force 模式下也不会被送翻；push 模式下已由 paths 排除）。多个逗号分隔。
-    SKIP_COLLECTIONS: "__SKIP_COLLECTIONS__"
+    # 译文覆盖策略：
+    #   all（默认）→ 开关打开的文章每次 EN 变更都重新翻译并覆盖全部目标语言。
+    #   missing     → 只补生成缺失的译文，已存在的一律保留（保护人工译文）。
+    # 无论哪种，译文 frontmatter 里 `translateLock: true` 的语言版本都永不覆盖。
+    OVERWRITE_MODE: "all"
     # 大站切片：单次翻译最多处理的文件数，超出自动拆成并行分片（避免 6h 超时 / 参数溢出）。
     CHUNK_SIZE: "20"
     # 语言单一来源校验：填 Sveltia 配置文件路径，工作流会校验其 locales 与 TARGET_LANGS 一致；
@@ -224,7 +234,6 @@ jobs:
               env:
                   AUTO_TRANSLATE: ${{ env.AUTO_TRANSLATE }}
                   CONTENT_ROOT: ${{ env.CONTENT_ROOT }}
-                  SKIP_COLLECTIONS: ${{ env.SKIP_COLLECTIONS }}
                   CHUNK_SIZE: ${{ env.CHUNK_SIZE }}
                   FORCE: ${{ github.event.inputs.force }}
                   SCOPE: ${{ github.event.inputs.scope }}
@@ -258,26 +267,32 @@ jobs:
                   const scope = process.env.SCOPE || '';
                   if (scope) map = map.filter(f => new RegExp(scope).test(f));
 
-                  const skip = (process.env.SKIP_COLLECTIONS || '')
-                    .split(',').map(s => s.trim()).filter(Boolean).map(c => new RegExp('/' + c + '/'));
-
+                  // 唯一开关：EN 文件 frontmatter 里显式写 autoTranslate: true 才送翻。
+                  // 与集合无关 —— 产品、博客、页面一视同仁；不写或 false 就是普通修改。
                   const keep = [];
+                  const reasons = { flag: 0, draft: 0, template: 0 };
                   for (const f of map) {
-                    let s = false;
                     const base = path.basename(f);
-                    if (base === '_template.md' || base === 'template.md') s = true;
-                    if (/\/(templates|_templates)\//.test(f)) s = true;
-                    if (skip.some(rx => rx.test(f))) s = true;
-                    if (!s && fs.existsSync(f)) {
+                    let reason = '';
+                    if (base === '_template.md' || base === 'template.md' || /\/(templates|_templates)\//.test(f)) {
+                      reason = '模板文件'; reasons.template++;
+                    } else if (fs.existsSync(f)) {
                       const h = sh(`head -n 40 "${f}"`);
-                      if (/^draft:\s*true\s*$/m.test(h)) s = true;          // 草稿不翻
-                      if (/^autoTranslate:\s*false\s*$/m.test(h)) s = true; // 单篇开关
+                      if (/^draft:\s*true\s*$/m.test(h)) { reason = '草稿'; reasons.draft++; }
+                      else if (!/^autoTranslate:\s*true\s*$/m.test(h)) { reason = '未开启 autoTranslate: true'; reasons.flag++; }
                     }
-                    if (s) console.log('跳过（模板/草稿/autoTranslate:false/集合排除）: ' + f);
+                    if (reason) console.log('跳过（' + reason + '）: ' + f);
                     else keep.push(f);
                   }
 
-                  if (keep.length === 0) { write('chunks', '[]'); write('has_files', 'false'); process.exit(0); }
+                  if (keep.length === 0) {
+                    if (map.length > 0) {
+                      console.log('::warning::检测到 ' + map.length + ' 个 EN 变更文件，但没有一个开启 autoTranslate: true，本次不翻译（translate / publish 会显示 Skipped）。');
+                      console.log('::warning::跳过原因：未开启开关 ' + reasons.flag + ' 个，草稿 ' + reasons.draft + ' 个，模板 ' + reasons.template + ' 个。');
+                      console.log('::warning::需要自动翻译时，请在 EN 文件 frontmatter 里设 autoTranslate: true（或在 CMS 后台勾选该开关）。');
+                    }
+                    write('chunks', '[]'); write('has_files', 'false'); process.exit(0);
+                  }
 
                   const N = parseInt(process.env.CHUNK_SIZE || '20', 10);
                   const chunks = [];

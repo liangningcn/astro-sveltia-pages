@@ -10,6 +10,58 @@ section below.
 
 ---
 
+## 0.4.0
+
+### Breaking changes
+
+- **Translation is now opted into per file, not per collection.** The workflow
+  no longer inspects CMS collections at all: `on.push.paths` is a single
+  wildcard (`<content-root>/**/en/**`) covering every collection, and detect
+  keeps only EN files whose frontmatter contains `autoTranslate: true`. An EN
+  edit without that flag is an ordinary edit — no translation runs. Edits to
+  non-EN locale files never trigger the workflow, so CMS-side translation
+  edits are safe.
+- `env.SKIP_COLLECTIONS` is gone from the generated workflow, and the
+  `--collections` / `--skip-collections` CLI flags are removed. Collections no
+  longer need `i18n: { save_all_locales: false, ... }` for this integration.
+- **The default flipped to opt-in.** Files that used `autoTranslate: false`
+  (an opt-out flag in 0.3.x) are now skipped unless the value is `true`.
+
+### Added
+
+- `env.OVERWRITE_MODE`: `all` (default) overwrites existing target-language
+  files on every flagged EN change; `missing` only writes files that do not
+  exist yet.
+- A target-language file with `translateLock: true` in its frontmatter is never
+  overwritten in either mode — that locale stays with the CMS.
+- detect logs a concrete reason for every skipped EN file (no flag / draft /
+  template) and prints the counts in `::warning::` annotations when nothing is
+  left, so a zero-file run is never silent.
+
+### Fixed
+
+- The entire class of 0.3.7/0.3.8 collection-parsing bugs is gone: phantom
+  `media_folder:` entries, a translated collection's name leaking into the skip
+  list, and a trailing global `i18n` block (or a comment mentioning
+  `initial_locales`) misclassifying the last collection. There is no collection
+  parsing left in the CLI.
+
+### Migration
+
+1. Upgrade and re-run `pnpm exec astro-sveltia-pages init:i18n` in every
+   consumer repository; commit the three regenerated files (template `0.4.0`).
+2. Add a boolean field to every CMS collection's `fields` — and to
+   `_template.md`, so new entries default to off — so editors can toggle it:
+   `{ label: 'Auto-translate', name: 'autoTranslate', widget: 'boolean', default: false, i18n: 'duplicate' }`.
+3. Existing EN files are **not** translated until `autoTranslate: true` is set
+   on them. Do not enable the flag repository-wide in one go; batch backfills
+   with `workflow_dispatch` + `force` + `scope`.
+4. If some locales are human-maintained, use `OVERWRITE_MODE: "missing"` or add
+   `translateLock: true` to those files. Otherwise every EN edit on a flagged
+   file regenerates and overwrites all target locales.
+
+---
+
 ## 0.3.7
 
 ### Fixed

@@ -384,8 +384,9 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             ```
 
             It auto-detects `sveltia-cms.config.mjs` (override with `--config <path>`), reads
-            `i18n.default_locale`, `i18n.locales` and each collection's `folder`, fills the
-            template placeholders, and writes three files:
+            `i18n.default_locale`, `i18n.locales` and `i18n.structure`, fills the
+            template placeholders, and writes three files. Since 0.4.0 it **no longer
+            parses collections** — each Markdown file decides for itself:
 
             - `.github/workflows/i18n-translate.yml`
             - `i18n/glossary.md`
@@ -396,8 +397,6 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             - `--content-root <path>` — content root (default `src/content`)
             - `--default-locale <lang>` — source locale (default `en`)
             - `--project-name <name>` — used in the glossary heading
-            - `--collections <a,b,c>` — only wire in these collections
-            - `--skip-collections <a,b>` — always exclude these collections
             - `--force` — overwrite files that already exist
             - `--check` — verify generated files are current (exits non-zero if stale; use in CI)
 
@@ -434,15 +433,33 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
       endpoint `https://api.deepseek.com` with `deepseek-flash` (the old
       `deepseek-v4-flash` name has been retired).
 
-3.  In your Sveltia CMS config, **every collection you want auto-translated must set**:
+3.  Add an **auto-translate toggle** to every CMS collection's `fields` (and to
+    `_template.md`, so new entries default to off):
 
     ```js
-    i18n: { save_all_locales: false, initial_locales: ["en"] }
+    { label: 'Auto-translate', name: 'autoTranslate', widget: 'boolean',
+      default: false, i18n: 'duplicate' }
     ```
 
-    This makes the CMS commit **only** the English source; CI produces the other
-    locales. Also mark untranslatable fields (`slug`, image paths, …) as
-    `i18n: duplicate`, and make sure the backend does **not** set `skip_ci: true`.
+    **Flag semantics (0.4.0+):**
+
+    - `autoTranslate: true` in an EN file's frontmatter → translate it and
+      overwrite all target-locale files;
+    - absent / `false` → an ordinary edit, CI leaves that entry alone;
+    - editing any non-EN locale file (`fr`, `de`, …) → never triggers the
+      workflow, so CMS-side translation edits are safe.
+
+    The workflow uses one wildcard,
+    `on.push.paths: <content-root>/**/en/**`, covering every collection; products,
+    blog posts and pages are treated identically. Keep untranslatable fields
+    (`slug`, image paths, …) marked `i18n: duplicate`, and make sure the backend
+    does **not** set `skip_ci: true`.
+
+> **Protecting human translations:** the default `OVERWRITE_MODE: "all"` means
+> every EN change on a flagged entry regenerates and overwrites all target
+> locales. To keep CMS-edited translations, either set `OVERWRITE_MODE: "missing"`
+> (only write files that do not exist yet) or add `translateLock: true` to a
+> translated file's frontmatter — that locale is never overwritten.
 
 4.  ⚠️ **Commit-message rule (critical):** never include a bracketed CI-skip marker such
     as `[skip ci]` / `[ci skip]` / `skip-checks` in a commit message. On GitHub
@@ -450,9 +467,12 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
     the Cloudflare deployment, so a translation push (or any deploy) would silently
     not run.
 
-5.  Pushing an English source file (e.g. `src/content/blog/en/my-post.md`) to `main`
-    triggers `i18n-translate`, which translates the change into every target locale,
-    self-checks the output, and commits it back to `main` (`PUBLISH_MODE: "commit"`).
+5.  Pushing an EN file (e.g. `src/content/blog/en/my-post.md`) **with
+    `autoTranslate: true`** to `main` triggers `i18n-translate`, which translates
+    the change into every target locale, self-checks the output, and commits it
+    back to `main` (`PUBLISH_MODE: "commit"`). EN edits without the flag are
+    ordinary edits: detect logs the skip reason and `translate` / `publish` show
+    Skipped.
     Set `PUBLISH_MODE: "pr"` in the generated workflow to require a human merge
     instead. The English source goes live immediately; all target locales are
     published together in one follow-up commit. Since 0.3.5 the workflow explicitly
@@ -461,9 +481,13 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
 
 > **Incremental & manual backfill:** the workflow caches pelikhan's per-locale
 > translation JSON (`i18n-translations/<lang>.json`) via `actions/cache`, so reruns
-> only re-translate changed nodes. Note that pelikhan regenerates translated files
-> from the English source plus that cache — it does **not** read existing translated
-> markdown, so manual edits to translated files are overwritten on the next run.
+> only re-translate changed nodes — that saves API calls, but the file written back
+> is still a full regeneration. pelikhan does **not** read existing translated
+> markdown, so under `OVERWRITE_MODE: "all"` manual edits are overwritten on the
+> next flagged EN change (protect them with `translateLock: true` or `"missing"`).
+> To backfill an existing site, first set `autoTranslate: true` on the target EN
+> files, then run the workflow manually (`workflow_dispatch`) with `force` and a
+> `scope` regex (e.g. `posts`) in batches. Only flagged files enter the list.
 > To bootstrap an already-populated site, run the workflow manually
 > (`workflow_dispatch`) with `force` + a `scope` regex (e.g. `posts`).
 

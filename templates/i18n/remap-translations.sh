@@ -27,6 +27,11 @@
 #   - 一律用普通 mv（不要用 git 的 mv 子命令）：暂存文件是 untracked 的，
 #     git 的 mv 会报 "not under version control"；后续工作流的
 #     `git add -A "$CONTENT_ROOT"` 会正确识别新增/修改。
+#   - 覆盖策略（工作流 env.OVERWRITE_MODE）：
+#       all     —— 默认，覆盖已存在的译文（开关打开即由 CI 维护全部语言）；
+#       missing —— 只补缺失译文，已存在的一律保留。
+#     译文 frontmatter 里写了 `translateLock: true` 的语言版本，无论哪种模式
+#     都永不覆盖，交给 CMS 后台独占维护。
 
 set -euo pipefail
 
@@ -86,7 +91,12 @@ canonical_lang() {
     printf '%s' "$candidate"
 }
 
+# all = 覆盖（默认）；missing = 只补缺失译文。
+OVERWRITE_MODE="${OVERWRITE_MODE:-all}"
+LOCK_RE='^translateLock:[[:space:]]*true[[:space:]]*$'
+
 moved=0
+skipped=0
 while IFS= read -r -d '' f; do
     # 跳过英文源文件本身（有清单时按清单，无清单时按文件名形状兜底）。
     if [ "${#SOURCES[@]}" -gt 0 ]; then
@@ -107,14 +117,33 @@ while IFS= read -r -d '' f; do
     coll="$(dirname "$rel")"        # docs/guides
     dest_lang="$(canonical_lang "$lang")"
     dest_dir="$CONTENT_ROOT/$coll/$dest_lang"
+    dest="$dest_dir/$slug.md"
+
+    # 已存在的译文：按比例决定是否保留。人工锁定优先级最高。
+    if [ -f "$dest" ]; then
+        if head -n 40 "$dest" | grep -Eq "$LOCK_RE"; then
+            echo "保留（translateLock: true，后台独占）: $dest"
+            skipped=$((skipped + 1))
+            rm -f "$f"
+            continue
+        fi
+        if [ "$OVERWRITE_MODE" = "missing" ]; then
+            echo "保留（OVERWRITE_MODE=missing）: $dest"
+            skipped=$((skipped + 1))
+            rm -f "$f"
+            continue
+        fi
+    fi
+
     mkdir -p "$dest_dir"
-    mv -f "$f" "$dest_dir/$slug.md"
+    mv -f "$f" "$dest"
     moved=$((moved + 1))
 done < <(find "$STAGE" -type f -name '*.md' -print0)
 
-echo "remap 完成，共移动 $moved 个译文文件。"
+handled=$((moved + skipped))
+echo "remap 完成：写入 $moved 个译文，保留已有 $skipped 个（OVERWRITE_MODE=$OVERWRITE_MODE）。"
 
-if [ "$moved" -eq 0 ]; then
+if [ "$handled" -eq 0 ]; then
     echo "::error::没有任何译文被映射，请检查翻译步骤是否产出 {slug}.{lang}.md。"
     exit 1
 fi
