@@ -1,9 +1,11 @@
+import { spawnSync } from "node:child_process";
 import {
     existsSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
     rmSync,
+    symlinkSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,9 +14,11 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-import { runInit } from "../src/cli.ts";
+import { dispatchCli, runInit } from "../src/cli.ts";
 
 const TEMPLATE_PATH = fileURLToPath(new URL("../templates/auth.js", import.meta.url));
+const DIST_DIR = fileURLToPath(new URL("../dist", import.meta.url));
+const BUILT_CLI = join(DIST_DIR, "cli.mjs");
 
 const tempDirs: string[] = [];
 
@@ -282,5 +286,115 @@ describe("init — EdgeOne Pages", () => {
             console_.restore();
             exitSpy.mockRestore();
         }
+    });
+});
+
+describe("CLI command dispatch", () => {
+    it("prints usage listing init:i18n for --help", () => {
+        const console_ = captureConsole();
+
+        try {
+            dispatchCli(["--help"], makeTempDir());
+
+            expect(console_.log.join("\n")).toContain("init:i18n");
+            expect(console_.log.join("\n")).toContain("--check");
+        } finally {
+            console_.restore();
+        }
+    });
+
+    it("rejects an unknown command instead of silently running init", () => {
+        const cwd = makeTempDir();
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code: number,
+        ) => {
+            throw new Error(`process.exit(${String(code)})`);
+        }) as never);
+        const console_ = captureConsole();
+
+        try {
+            expect(() => dispatchCli(["init:i19n"], cwd)).toThrow(/process\.exit\(1\)/);
+            expect(console_.error.join("\n")).toContain("Unknown command: init:i19n");
+            expect(existsSync(join(cwd, "functions", "auth.js"))).toBe(false);
+        } finally {
+            console_.restore();
+            exitSpy.mockRestore();
+        }
+    });
+
+    it("keeps the no-command and explicit init forms working", () => {
+        const bareCwd = makeTempDir();
+        const explicitCwd = makeTempDir();
+        const console_ = captureConsole();
+
+        try {
+            dispatchCli([], bareCwd);
+            dispatchCli(["init"], explicitCwd);
+        } finally {
+            console_.restore();
+        }
+
+        expect(existsSync(join(bareCwd, "functions", "auth.js"))).toBe(true);
+        expect(existsSync(join(explicitCwd, "functions", "auth.js"))).toBe(true);
+    });
+});
+
+// Regression: pnpm installs packages through symlinks. Node resolves the ESM
+// main module to its real path but leaves `process.argv[1]` as the shim path,
+// so the old strict equality check skipped the whole CLI (exit 0, no output).
+// These spawn the built CLI; they run once `pnpm build` has produced dist/.
+describe("CLI entry detection via a pnpm-style symlink", () => {
+    const runIt = existsSync(BUILT_CLI) ? it : it.skip;
+
+    function withLinkedDist(fn: (cliPath: string, cwd: string) => void): void {
+        const cwd = makeTempDir();
+        const link = join(cwd, "linked-dist");
+
+        symlinkSync(DIST_DIR, link, process.platform === "win32" ? "junction" : "dir");
+
+        try {
+            fn(join(link, "cli.mjs"), cwd);
+        } finally {
+            rmSync(link, { force: true });
+        }
+    }
+
+    runIt("fails loudly for an unknown command on the real path", () => {
+        const cwd = makeTempDir();
+        const result = spawnSync(
+            process.execPath,
+            [BUILT_CLI, "definitely-not-a-command"],
+            { cwd, encoding: "utf-8" },
+        );
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("Unknown command: definitely-not-a-command");
+    });
+
+    runIt("does not silently exit when reached through a symlink", () => {
+        withLinkedDist((cliPath, cwd) => {
+            const result = spawnSync(
+                process.execPath,
+                [cliPath, "definitely-not-a-command"],
+                { cwd, encoding: "utf-8" },
+            );
+
+            expect(result.status).toBe(1);
+            expect(result.stderr).toContain(
+                "Unknown command: definitely-not-a-command",
+            );
+        });
+    });
+
+    runIt("prints help when reached through a symlink", () => {
+        withLinkedDist((cliPath, cwd) => {
+            const result = spawnSync(process.execPath, [cliPath, "--help"], {
+                cwd,
+                encoding: "utf-8",
+            });
+
+            expect(result.status).toBe(0);
+            expect(result.stdout).toContain("init:i18n");
+        });
     });
 });

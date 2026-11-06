@@ -4,9 +4,10 @@ import {
     existsSync,
     mkdirSync,
     readFileSync,
+    realpathSync,
     writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -682,29 +683,99 @@ ${LOG_PREFIX} i18n 自动翻译已初始化（模板 ${I18N_TEMPLATE_VERSION}，
 `);
 }
 
+const CLI_USAGE = `
+${LOG_PREFIX} Usage:
+  astro-sveltia-pages init [--platform cloudflare|edgeone] [--site-url <url>]
+  astro-sveltia-pages init:i18n [--config <path>] [--content-root <path>]
+                                [--collections <a,b>] [--skip-collections <a,b>]
+                                [--force] [--check]
+  astro-sveltia-pages --help
+
+Commands:
+  init        Copy the GitHub OAuth edge function and update .env.example.
+              This is the default when no command is given.
+  init:i18n   Generate (or upgrade) the i18n auto-translation workflow,
+              glossary and remap script. Also available as \`init --i18n\`.
+`;
+
+/**
+ * Node resolves the ESM main module through symlinks, while `process.argv[1]`
+ * keeps the path pnpm's bin shim passed in (`node_modules/<pkg>/dist/cli.mjs`
+ * points into the `.pnpm` store). A raw string comparison therefore fails under
+ * pnpm: the whole dispatch block is skipped and the CLI exits 0 with no output.
+ * Compare canonical real paths instead (case-insensitively on Windows).
+ */
 function isCliInvokedAsScript(): boolean {
     const entry = process.argv[1];
 
-    return Boolean(entry) && fileURLToPath(import.meta.url) === entry;
+    if (!entry) {
+        return false;
+    }
+
+    const normalize = (value: string): string =>
+        process.platform === "win32" ? value.toLowerCase() : value;
+
+    try {
+        const self = fileURLToPath(import.meta.url);
+        const invoked = resolve(entry);
+
+        if (normalize(invoked) === normalize(self)) {
+            return true;
+        }
+
+        return (
+            normalize(realpathSync.native(invoked)) ===
+            normalize(realpathSync.native(self))
+        );
+    } catch {
+        return false;
+    }
 }
 
 function isI18nCommand(args: string[]): boolean {
     return args[0] === "init:i18n" || (args[0] === "init" && args.includes("--i18n"));
 }
 
+function failUnknownCommand(command: string): never {
+    console.error(
+        `${LOG_PREFIX} Unknown command: ${command}\n` +
+            "      Available commands: init, init:i18n (also `init --i18n`).\n" +
+            "      Run `astro-sveltia-pages --help` for usage.",
+    );
+    process.exit(1);
+}
+
+/** Dispatches one CLI invocation. Unknown subcommands fail loudly (exit 1). */
+export function dispatchCli(args: string[], cwd: string = process.cwd()): void {
+    if (args.includes("--help") || args.includes("-h")) {
+        console.log(CLI_USAGE);
+        return;
+    }
+
+    if (isI18nCommand(args)) {
+        const rest =
+            args[0] === "init:i18n"
+                ? args.slice(1)
+                : args.slice(1).filter((arg) => arg !== "--i18n");
+        runInitI18n(rest, cwd);
+        return;
+    }
+
+    const first = args[0];
+
+    // Keep the historical behaviour: no command, an explicit `init`, or a bare
+    // flag (e.g. `--platform edgeone`) all run the OAuth init.
+    if (!first || first === "init" || first.startsWith("-")) {
+        runInit(first === "init" ? args.slice(1) : args, cwd);
+        return;
+    }
+
+    failUnknownCommand(first);
+}
+
 if (isCliInvokedAsScript()) {
     try {
-        const args = process.argv.slice(2);
-
-        if (isI18nCommand(args)) {
-            const rest =
-                args[0] === "init:i18n"
-                    ? args.slice(1)
-                    : args.slice(1).filter((arg) => arg !== "--i18n");
-            runInitI18n(rest, process.cwd());
-        } else {
-            runInit(args, process.cwd());
-        }
+        dispatchCli(process.argv.slice(2), process.cwd());
     } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
 

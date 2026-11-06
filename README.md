@@ -401,6 +401,17 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             - `--force` — overwrite files that already exist
             - `--check` — verify generated files are current (exits non-zero if stale; use in CI)
 
+            A successful run is **never silent**: it logs one `已写入 …` (or
+            `⬆ 已升级 …`) line per file, then the
+            `i18n 自动翻译已初始化（模板 …，源语言 … → …）` summary and a setup
+            checklist. `--check` prints `✅ i18n 模板均为最新版本 …` (exit 0) or a
+            `STALE i18n TEMPLATES` notice (exit 1). Unknown subcommands now print
+            `Unknown command: <name>` and exit 1; `--help` lists both commands.
+            If a command produces **no output at all**, the CLI never ran. This
+            affected 0.3.6 and earlier under pnpm; upgrade to 0.3.7+, or use
+            `node node_modules/astro-sveltia-pages/dist/cli.mjs init:i18n` as a
+            temporary workaround.
+
             Generated files carry a version stamp. Re-running `init:i18n` **automatically
             upgrades** outdated generated files (the previous copy is kept as `*.bak`);
             the user-editable `i18n/glossary.md` is never auto-overwritten. `--force`

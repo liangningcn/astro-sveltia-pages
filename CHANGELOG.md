@@ -10,6 +10,45 @@ section below.
 
 ---
 
+## 0.3.7
+
+### Fixed
+
+- **CLI exited silently (status 0, no output) under pnpm.** `dist/cli.mjs` guarded
+  its dispatch block with
+  `fileURLToPath(import.meta.url) === process.argv[1]`. pnpm installs packages
+  through a symlink (a junction on Windows), so Node resolves the ESM main module
+  to its real `.pnpm` store path while `process.argv[1]` keeps the
+  `node_modules/<pkg>` shim path. The strict string comparison failed, the whole
+  dispatch block was skipped, and every command — including `init:i18n` —
+  returned immediately with no log, no error and no generated files. The entry
+  check now compares canonical real paths (case-insensitively on Windows), which
+  also covers `..` segments and drive-letter differences.
+- **Unknown subcommands were silently handled as `init`.** They now print
+  `Unknown command: <name>`, list the available commands and exit 1. Added
+  `--help` / `-h` usage output; `init:i18n` (and `init --i18n`) is documented as
+  a first-class command. This satisfies the "never fail silently" requirement
+  independently of the symlink bug.
+- README (EN / zh-CN) now documents the expected output of a successful
+  `init:i18n` run, of `--check`, and the "no output means the CLI never ran"
+  diagnostic.
+- Regression tests spawn the built CLI through a symlinked `dist` path and assert
+  it is no longer silent.
+
+### Migration
+
+- **Re-run `pnpm exec astro-sveltia-pages init:i18n` after upgrading to 0.3.7.**
+  `I18N_TEMPLATE_VERSION` follows the package version, so the three generated
+  files committed by 0.3.6 consumers are now stamped `0.3.6` and
+  `init:i18n --check` reports them as stale. The workflow content itself is
+  unchanged; this is the standard post-upgrade step.
+- Consumers still on 0.3.6 who hit the silent exit can work around it with
+  `node node_modules/astro-sveltia-pages/dist/cli.mjs init:i18n`. Note that
+  `Already up to date` printed around a `pnpm exec` call comes from pnpm's
+  dependency check, not from the CLI.
+
+---
+
 ## 0.3.6
 
 Bug-fix release for the _upgrade detection_ introduced in 0.3.5. A real CI log

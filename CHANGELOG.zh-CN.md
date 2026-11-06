@@ -8,6 +8,39 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.3.7
+
+### 修复
+
+- **pnpm 环境下 CLI 静默退出（退出码 0、无任何输出）。** `dist/cli.mjs` 用
+  `fileURLToPath(import.meta.url) === process.argv[1]` 判断是否为主入口。pnpm
+  通过符号链接（Windows 上是 junction）安装包，Node 会把 ESM 主模块解析到
+  `.pnpm` store 里的真实路径，而 `process.argv[1]` 保留
+  `node_modules/<pkg>` 的 shim 路径。严格字符串比较失败后，整个分发逻辑被跳过，
+  所有命令（包括 `init:i18n`）都立即返回：没有日志、没有报错、没有生成文件。
+  现在改为比较规范化后的真实路径（Windows 下忽略大小写），同时兼容 `..` 路径段
+  与盘符差异。
+- **未知子命令之前会被静默当作 `init` 执行。** 现在会输出
+  `Unknown command: <name>`、列出可用命令并以退出码 1 结束。新增 `--help` / `-h`
+  用法输出，`init:i18n`（及 `init --i18n`）作为正式命令列出。即使没有符号链接
+  问题，CLI 也不再"静默失败"。
+- README（中 / 英）补充 `init:i18n` 成功执行与 `--check` 的预期输出，以及
+  「完全没有输出 = CLI 根本没执行」的排查提示。
+- 新增回归测试：通过符号链接路径启动构建产物，断言 CLI 不再静默。
+
+### 迁移
+
+- **升级到 0.3.7 后请重跑 `pnpm exec astro-sveltia-pages init:i18n`。**
+  `I18N_TEMPLATE_VERSION` 跟随包版本，0.3.6 用户仓库里提交的三份生成文件标记为
+  `0.3.6`，`init:i18n --check` 会判定为过期。workflow 内容本身未变，这是每次
+  升级后的标准步骤。
+- 仍停留在 0.3.6 且遇到静默退出的用户，可用
+  `node node_modules/astro-sveltia-pages/dist/cli.mjs init:i18n` 绕过。
+  `pnpm exec` 附近打印的 `Already up to date` 来自 pnpm 的依赖检查，不是 CLI 的
+  输出，也不代表 CLI 被跳过。
+
+---
+
 ## 0.3.6
 
 修复 0.3.5 引入的「升级检测」缺陷。消费方仓库（`nextcharm`，运行
