@@ -1,3 +1,4 @@
+# 已有规则
 node_modules
 dist
 .astro
@@ -5,3 +6,14 @@ dist
 .tmp
 *.log
 .DS_Store
+
+# 误操作/命令残留文件
+/cls
+/mkdir
+/set
+
+# CI 运行日志
+logs_*/
+
+# 工具缓存
+.workbuddy/
