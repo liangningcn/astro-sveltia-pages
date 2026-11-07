@@ -396,3 +396,50 @@ describe("i18n workflow CMS UI locale parsing guards", () => {
         expect(cli).toContain('"sveltia.config.mjs"');
     });
 });
+
+// 0.4.5: translated commits used to be authored by a hardcoded bot identity,
+// and `init:i18n` refused to run on classic YAML CMS configs.
+describe("i18n workflow 0.4.5 regression guards", () => {
+    const workflow = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
+    const cli = readFileSync(
+        fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
+        "utf-8",
+    );
+
+    it("never hardcodes the i18n-bot commit identity", () => {
+        expect(workflow).not.toContain("i18n-bot@users.noreply.github.com");
+        expect(workflow).not.toContain('git config user.name "i18n-bot"');
+    });
+
+    it("exposes configurable author placeholders in the workflow env", () => {
+        expect(workflow).toContain('COMMIT_AUTHOR_NAME: "__COMMIT_AUTHOR_NAME__"');
+        expect(workflow).toContain('COMMIT_AUTHOR_EMAIL: "__COMMIT_AUTHOR_EMAIL__"');
+        expect(cli).toContain("__COMMIT_AUTHOR_NAME__");
+        expect(cli).toContain("resolveCommitAuthor");
+    });
+
+    it("falls back to the workflow triggerer in both commit steps", () => {
+        expect(workflow).toContain('I18N_NAME="${COMMIT_AUTHOR_NAME:-$I18N_ACTOR}"');
+        expect(workflow).toContain(
+            "I18N_PUSHER_EMAIL: ${{ github.event.pusher.email }}",
+        );
+        // PR mode must use the same identity as commit mode.
+        expect(workflow).toContain(
+            'author: "${{ steps.merge.outputs.I18N_COMMIT_NAME }}',
+        );
+    });
+
+    it("supports unquoted YAML CMS configs in both the CLI and CI validator", () => {
+        expect(cli).toContain('"public/admin/config.yml"');
+        expect(cli).toContain("YAML bare array");
+        expect(workflow).toContain("YAML bare array: locales: [en, es, fr]");
+        expect(workflow).toContain("c === '#'");
+    });
+
+    it("ships a postinstall hook that never breaks install", () => {
+        expect(cli).toContain("runPostinstallI18n");
+        expect(cli).toContain('args.includes("--postinstall")');
+        expect(cli).toContain("I18N_POSTINSTALL_COMMAND");
+        expect(cli).toContain('"--no-backup"');
+    });
+});

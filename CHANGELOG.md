@@ -10,7 +10,29 @@ section below.
 
 ---
 
-## Unreleased
+## 0.4.5
+
+### Added
+
+- **`init:i18n --postinstall` keeps the committed snapshots in sync automatically.**
+  With one `postinstall` line in `package.json`, local `pnpm add` / `pnpm install`
+  runs the hook and the change rides along in the same upgrade commit. The hook
+  is idempotent, a silent no-op when i18n is unused, creates no `.bak` files,
+  and degrades errors to warnings so install never fails. A standalone
+  `--no-backup` flag is available too. CI should gate with `git diff --exit-code`
+  instead, because postinstall repairs the runner copies and can make a later
+  `--check` pass while the committed snapshots are still stale.
+- **Configurable translation commit author.** Up to 0.4.4 a fixed bot identity
+  was hardcoded, so GitHub linked every translated commit to that bot account.
+  Commits now default to whoever triggered the run (`github.actor` + the push
+  author's email), and can be pinned with
+  `--commit-author "Name <email>"` or the workflow's `COMMIT_AUTHOR_NAME` /
+  `COMMIT_AUTHOR_EMAIL` env (preserved across upgrades). Commit mode and PR mode
+  share the same identity.
+- **Classic YAML CMS configs are supported.** `init:i18n` auto-detects
+  `public/admin/config.yml` and understands unquoted `locales: [en, fr]`,
+  `default_locale: en`, `structure: multiple_folders` and `#` comments; the CI
+  `Validate TARGET_LANGS` step uses the same algorithm (verified on reforteha).
 
 ### Fixed
 
@@ -24,15 +46,26 @@ section below.
   CLI and the CI validator use the same algorithm, guarded by static checks.
 - A parsed locale list that does not contain `default_locale` now fails loudly
   in both the CLI and CI instead of producing a bogus language list.
-- `init:i18n` also auto-detects `sveltia.config.mjs` / `.js`; those projects
-  previously had to pass `--config` manually.
+- `init:i18n` also auto-detects `sveltia.config.mjs` / `.js` and
+  `public/admin/config.yml`; those projects previously had to pass `--config`.
+- **Windows paths could produce invalid YAML.** `relative()` returned
+  `public\admin\config.yml`, and `\a` inside a double-quoted YAML scalar is an
+  unknown escape, so the whole workflow failed to parse. Paths are now emitted
+  with POSIX separators and every placeholder value is YAML-escaped.
 
 ### Migration
 
 - No Sveltia config change is needed: `locale: 'zh'` is a legitimate CMS UI
-  option and no longer needs the constant workaround.
-- Ships with the next release. After upgrading, rerun
-  `pnpm exec astro-sveltia-pages init:i18n` and commit the three generated files.
+  option and no longer needs the constant workaround (topq's `CMS_LOCALE` hack
+  can be reverted).
+- After upgrading to 0.4.5, rerun `pnpm exec astro-sveltia-pages init:i18n` once
+  and commit the three generated files; then configure the `postinstall` hook so
+  future upgrades sync themselves.
+- To attribute translated commits to your own account, rerun with
+  `--commit-author "Your Name <your GitHub-linked email>"`; otherwise the
+  triggerer is used.
+- The CI version gate compares `TEMPLATE_VERSION` with the installed package, so
+  **every consumer must rerun `init:i18n` once** or the next translation fails.
 
 ## 0.4.4
 

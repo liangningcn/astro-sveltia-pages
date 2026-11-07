@@ -8,7 +8,24 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
-## Unreleased
+## 0.4.5
+
+### 新增
+
+- **`init:i18n --postinstall`：升级依赖时自动同步三份生成快照。**
+  在 `package.json` 配一行 `postinstall` 钩子后，本地 `pnpm add` / `pnpm install`
+  会自动跑；改动随升级那次 commit 进入仓库。钩子幂等（最新版不写文件）、
+  未启用 i18n 的仓库静默跳过、不生成 `.bak`、配置异常只告警且**不阻断 install**；
+  另提供独立 `--no-backup`。CI 建议改用 `git diff --exit-code` 闸门，因为
+  postinstall 会把 runner 里的副本修好，之后的 `--check` 反而会误判通过。
+- **译文提交署名可配置。** 0.4.4 及更早写死一个固定 bot 账号，GitHub 按该邮箱
+  把译文 commit 关联到 bot 上。现在默认署名为触发工作流的人（`github.actor` +
+  push 作者邮箱），也可用 `--commit-author "Name <email>"` 或工作流 env
+  `COMMIT_AUTHOR_NAME` / `COMMIT_AUTHOR_EMAIL` 固定成自己的账号；升级会保留已填值。
+  commit 模式与 PR 模式使用同一身份。
+- **支持经典 YAML CMS 配置。** `init:i18n` 自动探测 `public/admin/config.yml`，
+  兼容无引号的 `locales: [en, fr]`、`default_locale: en`、`structure: multiple_folders`
+  与 `#` 注释；CI 的 `Validate TARGET_LANGS` 使用同一算法（reforteha 实测）。
 
 ### 修复
 
@@ -20,15 +37,23 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   解析前先剥离注释；CLI 与 CI 校验保持同一算法，并有静态守卫防止两边漂移。
 - 新增闸门：解析出的语言列表若不包含 `default_locale`，CLI 与 CI 都会明确失败，
   不再静默生成错误的语言清单。
-- `init:i18n` 现在也会自动探测 `sveltia.config.mjs` / `.js`，此前这类项目必须
-  手动传 `--config`。
+- `init:i18n` 现在也会自动探测 `sveltia.config.mjs` / `.js` 与
+  `public/admin/config.yml`，此前这类项目必须手动传 `--config`。
+- **Windows 下子目录配置文件会生成非法 YAML。** `relative(cwd, configPath)` 在
+  Windows 返回 `public\admin\config.yml`，写进 workflow 的双引号标量后 `\a`
+  被当成未知转义，整个 YAML 解析失败。现统一输出 POSIX 分隔符，并对所有
+  占位符值做 YAML 转义。
 
 ### 迁移
 
 - Sveltia 配置无需更改：`locale: 'zh'` 是合法的 CMS 界面语言选项，不必再改成
-  常量来绕过。
-- 修复随下一个版本发布；升级依赖后照例重跑
-  `pnpm exec astro-sveltia-pages init:i18n` 并提交三份生成文件。
+  常量来绕过（topq 的 `CMS_LOCALE` 常量 hack 可以还原）。
+- 升级到 0.4.5 后重跑一次 `pnpm exec astro-sveltia-pages init:i18n` 并提交三份
+  生成文件；之后建议配置 `postinstall` 钩子，升级即可自动同步。
+- 想让译文 commit 显示为自己的账号，重跑时加
+  `--commit-author "你的名字 <你的 GitHub 关联邮箱>"`；不加则署名为触发者。
+- 模板版本闸门要求 `TEMPLATE_VERSION` 与已装包版本一致，因此**所有消费方都需要
+  重跑一次 `init:i18n`**，否则下一次翻译会在 CI 直接失败。
 
 ## 0.4.4
 

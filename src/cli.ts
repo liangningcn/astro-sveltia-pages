@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import {
     I18N_CHECK_COMMAND,
+    I18N_POSTINSTALL_COMMAND,
     I18N_TEMPLATE_MARKER,
     I18N_TEMPLATE_VERSION,
     I18N_UPGRADE_COMMAND,
@@ -107,8 +108,21 @@ function envEntries(platform: InitPlatform): { key: string; comment: string }[] 
     ];
 }
 
+/**
+ * `--postinstall` must never break `pnpm install`: a missing CMS config or a
+ * stale lockfile is a warning there, not a fatal error. In that mode `fail()`
+ * throws so the hook can catch it and degrade to a notice.
+ */
+let softFail = false;
+let quiet = false;
+
 function fail(message: string): never {
     console.error(`${LOG_PREFIX} init failed: ${message}`);
+
+    if (softFail) {
+        throw new Error(message);
+    }
+
     process.exit(1);
 }
 
@@ -289,14 +303,16 @@ function resolveI18nTemplatePath(name: string): string {
 }
 
 function extractDefaultLocale(text: string): string {
-    const match = text.match(/default_locale:\s*['"](\w+)['"]/);
+    // Sveltia configs exist both as JS/TS object literals (quoted) and as YAML
+    // (`default_locale: en`, unquoted). Accept both.
+    const match = text.match(/default_locale:\s*['"]?([\w-]+)['"]?/);
     return match ? match[1] : "";
 }
 
 /**
- * Removes JS line and block comments while keeping string literals intact.
- * Config headers often mention `locale: 'zh'` in prose; a whole-file scan used
- * to treat those words as real configuration.
+ * Removes JS line/block comments and YAML `#` comments while keeping string
+ * literals intact. Config headers often mention `locale: 'zh'` in prose; a
+ * whole-file scan used to treat those words as real configuration.
  */
 function stripConfigComments(text: string): string {
     let out = "";
@@ -322,6 +338,19 @@ function stripConfigComments(text: string): string {
         if (char === "'" || char === '"' || char === "`") {
             quote = char;
             out += char;
+            continue;
+        }
+
+        // YAML line comment. A `#` inside a quoted string is protected above;
+        // requiring whitespace/line-start before it keeps URL fragments alone.
+        if (
+            char === "#" &&
+            (out.length === 0 || /[\s]/.test(out[out.length - 1] ?? ""))
+        ) {
+            while (i < text.length && text[i] !== "\n") {
+                i += 1;
+            }
+            out += "\n";
             continue;
         }
 
@@ -414,9 +443,10 @@ function extractLocales(text: string): string[] {
         return [];
     }
 
-    // Object form: locales: [{ locale: 'en', label: 'English' }, ...]
+    // Object form: locales: [{ locale: 'en', label: 'English' }, ...].
+    // YAML object lists may leave the value unquoted (`locale: en`).
     const objectKeys = [
-        ...block.matchAll(/(?<![\w])locale\s*:\s*['"]([\w-]+)['"]/g),
+        ...block.matchAll(/(?<![\w])locale\s*:\s*['"]?([\w-]+)['"]?/g),
     ].map((match) => match[1]);
 
     if (objectKeys.length > 0) {
@@ -429,14 +459,30 @@ function extractLocales(text: string): string[] {
         return [];
     }
 
-    return [
+    const quoted = [
         ...new Set([...block.matchAll(/['"]([\w-]+)['"]/g)].map((match) => match[1])),
+    ];
+
+    if (quoted.length > 0) {
+        return quoted;
+    }
+
+    // YAML bare array: `locales: [en, es, fr, de]` (reforteha's config.yml).
+    // Only language-shaped tokens survive, so comments and stray words cannot
+    // leak into TARGET_LANGS.
+    return [
+        ...new Set(
+            block
+                .split(/[^A-Za-z0-9_-]+/)
+                .filter((token) => /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/i.test(token)),
+        ),
     ];
 }
 
 function extractStructure(text: string): string {
+    // YAML configs write `structure: multiple_folders` without quotes.
     const match = text.match(
-        /structure:\s*['"](multiple_folders|single_file|multiple_files)['"]/,
+        /structure:\s*['"]?(multiple_folders|single_file|multiple_files)['"]?/,
     );
     return match ? match[1] : "multiple_folders";
 }
@@ -469,6 +515,13 @@ function readI18nConfigPath(cwd: string, configArg: string | undefined): string 
               "src/sveltia-cms.config.js",
               "src/sveltia.config.mjs",
               "src/sveltia.config.js",
+              // Classic Decap/Sveltia sites keep the CMS config as YAML under
+              // public/admin (e.g. reforteha). 0.4.4 only understood .mjs/.js,
+              // so `init:i18n` refused to run on those repositories.
+              "public/admin/config.yml",
+              "public/admin/config.yaml",
+              "config.yml",
+              "config.yaml",
           ];
 
     for (const candidate of candidates) {
@@ -480,17 +533,118 @@ function readI18nConfigPath(cwd: string, configArg: string | undefined): string 
     }
 
     fail(
-        "未找到 Sveltia CMS 配置文件（默认查找 sveltia-cms.config.mjs / sveltia.config.mjs）。\n" +
+        "未找到 Sveltia CMS 配置文件（默认查找 sveltia-cms.config.mjs / sveltia.config.mjs / public/admin/config.yml）。\n" +
             "      请通过 --config <path> 指定，或在项目根目录创建其中一个（见 README）。",
     );
 }
 
+type CommitAuthor = { name: string; email: string };
+
+/** Accepts `Name <mail@example.com>`, a bare email, or a bare name. */
+function parseCommitAuthor(raw: string): CommitAuthor {
+    const match = raw.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+
+    if (match) {
+        return { name: match[1].trim(), email: match[2].trim() };
+    }
+
+    if (raw.includes("@")) {
+        return { name: "", email: raw.trim() };
+    }
+
+    return { name: raw.trim(), email: "" };
+}
+
+/**
+ * The generated workflow commits translations with this identity. Priority:
+ * `--commit-author`, then values already committed in the existing workflow
+ * (so later upgrades never reset a hand-picked identity), then empty, which
+ * makes the workflow fall back to whoever triggered the run.
+ */
+function resolveCommitAuthor(args: string[], cwd: string): CommitAuthor {
+    const explicit = readArgValue(args, "--commit-author");
+
+    if (explicit) {
+        return parseCommitAuthor(explicit);
+    }
+
+    const workflowPath = join(cwd, ".github", "workflows", "i18n-translate.yml");
+
+    if (existsSync(workflowPath)) {
+        const existing = readFileSync(workflowPath, "utf-8");
+        const name = /^\s*COMMIT_AUTHOR_NAME:\s*"([^"]*)"/m.exec(existing)?.[1] ?? "";
+        const email = /^\s*COMMIT_AUTHOR_EMAIL:\s*"([^"]*)"/m.exec(existing)?.[1] ?? "";
+
+        if (name || email) {
+            return { name, email };
+        }
+    }
+
+    return { name: "", email: "" };
+}
+
+const yamlString = (value: string): string =>
+    value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+/**
+ * `postinstall` hook: upgrade the committed i18n snapshots right when
+ * `pnpm add` / `pnpm install` runs, so the change rides along in the same
+ * upgrade commit. Never breaks install, never generates .bak files, and is a
+ * silent no-op in repositories that have not enabled i18n.
+ */
+function runPostinstallI18n(args: string[], cwd: string): void {
+    const before = inspectI18nTemplates(cwd);
+
+    // No generated files at all => this repository never ran init:i18n.
+    if (!before.enabled) {
+        return;
+    }
+
+    softFail = true;
+    quiet = true;
+
+    try {
+        runInitI18n(
+            [...args.filter((arg) => arg !== "--postinstall"), "--no-backup"],
+            cwd,
+        );
+    } catch (error) {
+        console.error(
+            `${LOG_PREFIX} ⚠️ postinstall 未能更新 i18n 模板（不影响本次 install）：\n` +
+                `   ${error instanceof Error ? error.message : String(error)}\n` +
+                `   请在本地运行 \`${I18N_UPGRADE_COMMAND}\` 后提交三份生成文件。`,
+        );
+    } finally {
+        softFail = false;
+        quiet = false;
+    }
+
+    const after = inspectI18nTemplates(cwd);
+
+    if (before.outdated && !after.outdated) {
+        console.log(
+            `${LOG_PREFIX} ✅ postinstall：三份 i18n 模板已升级到 ${I18N_TEMPLATE_VERSION}，` +
+                "请随本次依赖升级一起提交。",
+        );
+    } else if (!after.outdated) {
+        console.log(
+            `${LOG_PREFIX} postinstall：i18n 模板已是 ${I18N_TEMPLATE_VERSION}，无需改动。`,
+        );
+    }
+}
+
 export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
+    if (args.includes("--postinstall")) {
+        runPostinstallI18n(args, cwd);
+        return;
+    }
+
     if (args.includes("--check")) {
         checkI18nTemplates(cwd);
         return;
     }
 
+    const noBackup = args.includes("--no-backup");
     const force = args.includes("--force") || args.includes("--force=true");
     const configArg = readArgValue(args, "--config");
     const contentRoot = readArgValue(args, "--content-root") ?? "src/content";
@@ -498,7 +652,11 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
     const projectName = readArgValue(args, "--project-name") ?? deriveProjectName(cwd);
 
     const configPath = readI18nConfigPath(cwd, configArg);
-    const configRelative = relative(cwd, configPath) || "sveltia-cms.config.mjs";
+    // `relative()` returns backslashes on Windows. Those are unknown escape
+    // sequences inside a YAML double-quoted scalar (e.g. `public\admin\...`),
+    // so always emit POSIX separators for paths written into the workflow.
+    const configRelative =
+        relative(cwd, configPath).replace(/\\/g, "/") || "sveltia-cms.config.mjs";
     // Comments may mention `locale: 'xx'` in prose; strip them before parsing.
     const configText = stripConfigComments(readFileSync(configPath, "utf-8"));
 
@@ -542,11 +700,16 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
         resolveI18nTemplatePath("i18n-translate.yml"),
         "utf-8",
     );
+    const author = resolveCommitAuthor(args, cwd);
+    // Every placeholder lands inside a YAML double-quoted scalar; escape
+    // backslashes and quotes so Windows paths / custom values stay valid YAML.
     const workflow = workflowTemplate
-        .replace(/__CONTENT_ROOT__/g, contentRoot)
-        .replace(/__TARGET_LANGS__/g, targetLangs.join(","))
-        .replace(/__CONFIG_FILE__/g, configRelative)
-        .replace(/__I18N_STRUCTURE__/g, structure);
+        .replace(/__CONTENT_ROOT__/g, yamlString(contentRoot))
+        .replace(/__TARGET_LANGS__/g, yamlString(targetLangs.join(",")))
+        .replace(/__CONFIG_FILE__/g, yamlString(configRelative))
+        .replace(/__I18N_STRUCTURE__/g, yamlString(structure))
+        .replace(/__COMMIT_AUTHOR_NAME__/g, yamlString(author.name))
+        .replace(/__COMMIT_AUTHOR_EMAIL__/g, yamlString(author.email));
 
     // Fill the glossary template.
     const glossaryTemplate = readFileSync(
@@ -659,10 +822,17 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
 
             // Keep the previous file next to the new one; the .bak suffix is not
             // picked up by GitHub Actions as a workflow and can be deleted later.
-            copyFileSync(target, `${target}.bak`);
+            // `postinstall` / `--no-backup` skip it: git history is already the
+            // backup when the change rides along in the upgrade commit.
+            if (!noBackup) {
+                copyFileSync(target, `${target}.bak`);
+            }
             writeFileSync(target, entry.content, { mode: entry.mode });
             console.log(
-                `${LOG_PREFIX} ⬆ 已升级 ${entry.rel}（${foundVersion ?? "旧版"} → ${I18N_TEMPLATE_VERSION}），原文件备份为 ${entry.rel}.bak`,
+                `${LOG_PREFIX} ⬆ 已升级 ${entry.rel}（${foundVersion ?? "旧版"} → ${I18N_TEMPLATE_VERSION}）` +
+                    (noBackup
+                        ? "（未生成 .bak：改动随 commit 进入仓库）"
+                        : `，原文件备份为 ${entry.rel}.bak`),
             );
             upgraded += 1;
             continue;
@@ -679,20 +849,21 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
         skipped += 1;
     }
 
-    if (upgraded > 0) {
-        console.log(`
+    if (!quiet) {
+        if (upgraded > 0) {
+            console.log(`
 ${LOG_PREFIX} ⚠️ 已从旧版模板升级到 ${I18N_TEMPLATE_VERSION}：
 ${stale.map((item) => `   • ${item.rel}（${item.from}）`).join("\n")}
 ${I18N_UPGRADE_NOTICE}
-   旧文件已备份为 *.bak，确认升级无误后可删除，或加入 .gitignore。
+   ${noBackup ? "未生成 .bak：改动随本次升级 commit 进入仓库即可。" : "旧文件已备份为 *.bak，确认升级无误后可删除，或加入 .gitignore。"}
 `);
-    } else if (skipped > 0 && wrote === 0) {
-        console.error(
-            `${LOG_PREFIX} 三份文件均已存在，未做任何改动（--force 可覆盖）。`,
-        );
-    }
+        } else if (skipped > 0 && wrote === 0) {
+            console.error(
+                `${LOG_PREFIX} 三份文件均已存在，未做任何改动（--force 可覆盖）。`,
+            );
+        }
 
-    console.log(`
+        console.log(`
 ${LOG_PREFIX} i18n 自动翻译已初始化（模板 ${I18N_TEMPLATE_VERSION}，源语言 ${defaultLocale} → ${targetLangs.join(", ")}）。
 
 下一步（必做）：
@@ -707,9 +878,13 @@ ${LOG_PREFIX} i18n 自动翻译已初始化（模板 ${I18N_TEMPLATE_VERSION}，
 4. 在 ${contentRoot}/**/en/** 下发布一个 ${defaultLocale} 文件、并把 frontmatter 的
    autoTranslate 设为 true，即会触发 i18n-translate；不打开开关就是普通修改。
    其它语言版本在 CMS 后台随意修改都不会触发工作流。
-5. 每次升级 astro-sveltia-pages 后重跑 \`${I18N_UPGRADE_COMMAND}\`
+5. 推荐在 package.json 配置 postinstall 钩子，升级依赖时自动同步三份模板：
+     "postinstall": "${I18N_POSTINSTALL_COMMAND}"
+   本地 pnpm add / pnpm install 即自动跑，改动随升级那次 commit 进入仓库。
+   未配置钩子时，每次升级需重跑 \`${I18N_UPGRADE_COMMAND}\`
    （或 \`${I18N_CHECK_COMMAND}\` 在 CI 中拦截过期模板）。
 `);
+    }
 }
 
 const CLI_USAGE = `
@@ -717,7 +892,8 @@ ${LOG_PREFIX} Usage:
   astro-sveltia-pages init [--platform cloudflare|edgeone] [--site-url <url>]
   astro-sveltia-pages init:i18n [--config <path>] [--content-root <path>]
                                 [--default-locale <lang>] [--project-name <name>]
-                                [--force] [--check]
+                                [--commit-author "Name <email>"]
+                                [--force] [--check] [--no-backup] [--postinstall]
   astro-sveltia-pages --help
 
 Commands:
@@ -725,6 +901,15 @@ Commands:
               This is the default when no command is given.
   init:i18n   Generate (or upgrade) the i18n auto-translation workflow,
               glossary and remap script. Also available as \`init --i18n\`.
+
+Flags:
+  --postinstall   Hook mode for package.json postinstall: no-op when i18n is not
+                  enabled, upgrade only stale snapshots, no .bak, never fails
+                  the install, and prints a reminder to commit the change.
+  --no-backup     Skip *.bak copies (git history is the backup).
+  --commit-author Fix the git author of translated commits, e.g.
+                  "liangningcn <liangningcn@users.noreply.github.com>".
+                  Empty = attribute each run to whoever triggered it.
 `;
 
 /**

@@ -249,6 +249,22 @@ async function buildI18nTemplates() {
             "pnpm exec astro-sveltia-pages init:i18n",
             "canonical pnpm upgrade command in the notice",
         ],
+        [
+            'COMMIT_AUTHOR_NAME: "__COMMIT_AUTHOR_NAME__"',
+            "configurable translation commit author name (0.4.5)",
+        ],
+        [
+            'COMMIT_AUTHOR_EMAIL: "__COMMIT_AUTHOR_EMAIL__"',
+            "configurable translation commit author email (0.4.5)",
+        ],
+        [
+            'I18N_NAME="${COMMIT_AUTHOR_NAME:-$I18N_ACTOR}"',
+            "commit author falls back to the workflow triggerer (0.4.5)",
+        ],
+        [
+            "YAML bare array: locales: [en, es, fr]",
+            "CI validator supports unquoted YAML locale lists (0.4.5)",
+        ],
     ];
 
     for (const [needle, label] of invariants) {
@@ -293,6 +309,14 @@ async function buildI18nTemplates() {
     if (/\buses:\s*actions\/cache@v4\b/.test(workflow)) {
         throw new Error(
             "i18n workflow must not use the combined actions/cache@v4; use actions/cache/restore@v4 + actions/cache/save@v4 with always().",
+        );
+    }
+
+    // 0.4.4 hardcoded this identity; GitHub then attributed every translated
+    // commit to a bot account instead of the person who published the post.
+    if (/i18n-bot@users\.noreply\.github\.com/.test(workflow)) {
+        throw new Error(
+            "i18n workflow must not hardcode the i18n-bot commit identity.",
         );
     }
 

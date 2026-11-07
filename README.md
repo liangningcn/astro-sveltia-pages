@@ -383,8 +383,10 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             pnpm exec astro-sveltia-pages init:i18n
             ```
 
-            It auto-detects `sveltia-cms.config.mjs` / `sveltia.config.mjs`
-            (override with `--config <path>`), reads
+            It auto-detects `sveltia-cms.config.mjs` / `sveltia.config.mjs`,
+            and since 0.4.5 also classic YAML configs such as
+            `public/admin/config.yml` (unquoted `locales: [en, fr]` works too;
+            override with `--config <path>`), reads
             `i18n.default_locale`, `i18n.locales` and `i18n.structure`, fills the
             template placeholders, and writes three files. Since 0.4.0 it **no longer
             parses collections** — each Markdown file decides for itself:
@@ -401,8 +403,12 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             - `--content-root <path>` — content root (default `src/content`)
             - `--default-locale <lang>` — source locale (default `en`)
             - `--project-name <name>` — used in the glossary heading
+            - `--commit-author "Name <email>"` — fix the author of translated commits
             - `--force` — overwrite files that already exist
             - `--check` — verify generated files are current (exits non-zero if stale; use in CI)
+            - `--no-backup` — skip `*.bak` copies (git history is the backup)
+            - `--postinstall` — hook mode: silent no-op when i18n is unused, upgrades
+              only stale snapshots, no `.bak`, never breaks `pnpm install`
 
             A successful run is **never silent**: it logs one `已写入 …` (or
             `⬆ 已升级 …`) line per file, then the
@@ -428,6 +434,45 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
 > template stamp does not match the installed package. Add
 > `pnpm exec astro-sveltia-pages init:i18n --check` to your CI to catch stale
 > templates at build time (or set `i18nTemplateCheck: "error"`).
+
+**Upgrade automation (0.4.5, recommended)**: make the manual re-run unnecessary
+with one line in `package.json`:
+
+```json
+"scripts": {
+    "postinstall": "node ./node_modules/astro-sveltia-pages/dist/cli.mjs init:i18n --postinstall"
+}
+```
+
+> **Local `pnpm add` / `pnpm install` runs postinstall automatically; the change
+> rides along in the same upgrade commit.**
+
+The hook is idempotent (writes nothing when the snapshots are current), a silent
+no-op in repositories that never enabled i18n, creates no `.bak` files, and
+degrades every error to a warning so install never fails. Pointing at
+`dist/cli.mjs` avoids the pnpm/Windows timing where lifecycle scripts run before
+the `.bin` shim is linked.
+
+> ⚠️ postinstall also runs in CI and will "repair" the runner's copies, which can
+> make a later `--check` pass while the committed snapshots are still stale. Use
+> `git diff --exit-code -- .github/workflows/i18n-translate.yml i18n/glossary.md scripts/remap-translations.sh`
+> as the CI gate instead. Do **not** put this command in a Cloudflare / EdgeOne
+> Pages build command: that checkout is read-only and discarded, so nothing lands
+> in the repository and the version gate still fails.
+
+**Translation commit author (0.4.5)**: releases up to 0.4.4 hardcoded a fixed
+bot identity, so GitHub attributed every translated commit to that bot account.
+By default commits are now attributed to whoever triggered the run
+(`github.actor` + the push author's email). To pin your own account:
+
+```bash
+pnpm exec astro-sveltia-pages init:i18n --commit-author "liangningcn <liangningcn@users.noreply.github.com>"
+```
+
+You can also edit `env.COMMIT_AUTHOR_NAME` / `COMMIT_AUTHOR_EMAIL` in the generated
+workflow directly; later upgrades preserve those values. Use an email associated
+with the GitHub account (preferably `username@users.noreply.github.com`), otherwise
+the name is shown without an account link.
 
 2.  Add the GitHub repository secret
     (**Settings → Secrets and variables → Actions → New repository secret**):

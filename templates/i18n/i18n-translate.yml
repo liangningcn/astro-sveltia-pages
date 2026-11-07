@@ -177,6 +177,16 @@ env:
     TRANSLATION_MODEL: "deepseek-flash"
     # OpenAI 兼容端点；与 DEEPSEEK_API_KEY 一起由翻译步骤注入容器环境变量。
     OPENAI_API_BASE: "https://api.deepseek.com"
+    # ── 译文提交署名（0.4.5）──────────────────────────────────────────────
+    # 0.4.4 及更早把译文提交的作者写死为一个固定 bot 账号，GitHub 会按那个
+    # noreply 邮箱把 commit 关联到该账号（看起来像机器人发稿）。
+    # 现在：留空 → 自动署名为触发本次工作流的人（github.actor + push 作者邮箱）；
+    # 想固定成自己的账号 → 填 GitHub 账号关联的邮箱，例如
+    #   COMMIT_AUTHOR_NAME: "liangningcn"
+    #   COMMIT_AUTHOR_EMAIL: "liangningcn@users.noreply.github.com"
+    # 由 init:i18n 填充：--commit-author "Name <email>"；升级时会保留已填的值。
+    COMMIT_AUTHOR_NAME: "__COMMIT_AUTHOR_NAME__"
+    COMMIT_AUTHOR_EMAIL: "__COMMIT_AUTHOR_EMAIL__"
 
 jobs:
     # ── 阶段 1：检测变更 + 过滤 + 切片（单 job，输出 JSON 分片列表）──
@@ -277,6 +287,8 @@ jobs:
                       const c = s[i], n = s[i + 1] || '';
                       if (quote) { out += c; if (c === '\\') { out += n; i++; } else if (c === quote) quote = ''; continue; }
                       if (c === "'" || c === '"' || c === '`') { quote = c; out += c; continue; }
+                      // YAML line comment (a # inside a quoted string is kept).
+                      if (c === '#' && (out.length === 0 || /[\s]/.test(out[out.length - 1] || ''))) { while (i < s.length && s[i] !== '\n') i++; out += '\n'; continue; }
                       if (c === '/' && n === '/') { while (i < s.length && s[i] !== '\n') i++; out += '\n'; continue; }
                       if (c === '/' && n === '*') { i += 2; while (i < s.length && !(s[i] === '*' && s[i+1] === '/')) i++; i++; out += ' '; continue; }
                       out += c;
@@ -300,14 +312,17 @@ jobs:
                   const parseLocales = s => {
                     const b = localesBlock(s);
                     if (b === null) return [];
-                    const keys = [...b.matchAll(/(?<![\w])locale\s*:\s*['"]([\w-]+)['"]/g)].map(m => m[1]);
+                    const keys = [...b.matchAll(/(?<![\w])locale\s*:\s*['"]?([\w-]+)['"]?/g)].map(m => m[1]);
                     if (keys.length) return [...new Set(keys)];
                     if (b.includes('{')) return [];
-                    return [...new Set([...b.matchAll(/['"]([\w-]+)['"]/g)].map(m => m[1]))];
+                    const quoted = [...new Set([...b.matchAll(/['"]([\w-]+)['"]/g)].map(m => m[1]))];
+                    if (quoted.length) return quoted;
+                    // YAML bare array: locales: [en, es, fr] (config.yml projects).
+                    return [...new Set(b.split(/[^A-Za-z0-9_-]+/).filter(t => /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/i.test(t)))];
                   };
 
                   const src = stripComments(fs.readFileSync(p, 'utf8'));
-                  const dl = src.match(/default_locale:\s*['"](\w+)['"]/);
+                  const dl = src.match(/default_locale:\s*['"]?([\w-]+)['"]?/);
                   const locs = parseLocales(src);
                   if (!dl || !locs.length) { console.log('未在配置中找到 locales，跳过校验'); process.exit(0); }
                   if (!locs.includes(dl[1])) {
@@ -787,6 +802,10 @@ jobs:
 
             # 自检 + 提交到共享 batch 分支（带 --force-with-lease 与重试，防并发/手推冲突）
             - name: Self-check & commit to batch branch
+              env:
+                  I18N_ACTOR: ${{ github.actor }}
+                  I18N_PUSHER_EMAIL: ${{ github.event.pusher.email }}
+                  I18N_HEAD_AUTHOR_EMAIL: ${{ github.event.head_commit.author.email }}
               run: |
                   set -euo pipefail
                   BR="i18n/batch-${{ github.run_id }}"
@@ -798,8 +817,13 @@ jobs:
                     echo "⚠️ 译文与已有内容一致（无变更），跳过提交。"
                     exit 0
                   fi
-                  git config user.name "i18n-bot"
-                  git config user.email "i18n-bot@users.noreply.github.com"
+                  # 署名优先级：显式配置 > 触发本次工作流的人 > 兜底 noreply。
+                  # 事件字段经 step env 注入，不直接拼进 shell（避免注入）。
+                  I18N_NAME="${COMMIT_AUTHOR_NAME:-$I18N_ACTOR}"
+                  I18N_EMAIL="${COMMIT_AUTHOR_EMAIL:-${I18N_PUSHER_EMAIL:-${I18N_HEAD_AUTHOR_EMAIL:-$I18N_ACTOR@users.noreply.github.com}}}"
+                  git config user.name "$I18N_NAME"
+                  git config user.email "$I18N_EMAIL"
+                  echo "译文提交署名：$I18N_NAME <$I18N_EMAIL>"
                   git fetch origin "$BR" 2>/dev/null || true
                   git checkout -B "$BR" "origin/$BR" 2>/dev/null || git checkout -b "$BR"
                   git commit -m "i18n: shard ${{ matrix.i }} (EN → ${{ env.TARGET_LANGS }})"
@@ -874,13 +898,23 @@ jobs:
 
             - name: Collect chunk branches
               id: merge
+              env:
+                  I18N_ACTOR: ${{ github.actor }}
+                  I18N_PUSHER_EMAIL: ${{ github.event.pusher.email }}
+                  I18N_HEAD_AUTHOR_EMAIL: ${{ github.event.head_commit.author.email }}
               run: |
                   set -uo pipefail
                   BR="i18n/batch-${{ github.run_id }}"
+                  # 同一 job 的后续 merge commit 也沿用这套署名。
+                  I18N_NAME="${COMMIT_AUTHOR_NAME:-$I18N_ACTOR}"
+                  I18N_EMAIL="${COMMIT_AUTHOR_EMAIL:-${I18N_PUSHER_EMAIL:-${I18N_HEAD_AUTHOR_EMAIL:-$I18N_ACTOR@users.noreply.github.com}}}"
+                  git config user.name "$I18N_NAME"
+                  git config user.email "$I18N_EMAIL"
+                  echo "I18N_COMMIT_NAME=$I18N_NAME" >> "$GITHUB_OUTPUT"
+                  echo "I18N_COMMIT_EMAIL=$I18N_EMAIL" >> "$GITHUB_OUTPUT"
+                  echo "译文提交署名：$I18N_NAME <$I18N_EMAIL>"
                   git fetch origin "$BR" 2>/dev/null || true
                   if git rev-parse --verify "origin/$BR" >/dev/null 2>&1; then
-                    git config user.name "i18n-bot"
-                    git config user.email "i18n-bot@users.noreply.github.com"
                     git checkout -b "$BR" "origin/$BR"
                     echo "merged=true" >> "$GITHUB_OUTPUT"
                   else
@@ -924,6 +958,8 @@ jobs:
                   token: ${{ secrets.GITHUB_TOKEN }}
                   base: main
                   branch: i18n/batch-${{ github.run_id }}
+                  # 与 commit 模式保持同一署名，避免 PR 里又变回 github-actions[bot]。
+                  author: "${{ steps.merge.outputs.I18N_COMMIT_NAME }} <${{ steps.merge.outputs.I18N_COMMIT_EMAIL }}>"
                   commit-message: "i18n: auto-translate from EN sources"
                   title: "🌐 i18n: 自动翻译（源语言 EN）"
                   body: |

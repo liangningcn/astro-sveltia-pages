@@ -949,3 +949,188 @@ function captureConsole(): { log: string[]; error: string[]; restore: () => void
         },
     };
 }
+
+// 0.4.5: classic Sveltia/Decap repositories keep the CMS config as YAML under
+// public/admin, with unquoted values and a top-level CMS UI `locale: 'zh'`.
+const YAML_CMS_CONFIG = `# CMS 后台界面语言
+locale: 'zh'
+# 注释里的 locale: 'xx' / locales: ['zz'] 不应参与解析
+i18n:
+  structure: multiple_folders
+  locales: [en, es, fr, de, it, pt, ru, ar, ja, ko, th, tr, pl]
+  default_locale: en
+collections:
+  - name: blog
+    folder: src/content/blog
+`;
+
+const YAML_TARGET_LANGS = "ar,de,es,fr,it,ja,ko,pl,pt,ru,th,tr";
+
+describe("init:i18n — YAML CMS config (0.4.5)", () => {
+    it("auto-detects public/admin/config.yml with unquoted locale values", () => {
+        const cwd = makeTempDir();
+        mkdirSync(join(cwd, "public", "admin"), { recursive: true });
+        writeFileSync(join(cwd, "public", "admin", "config.yml"), YAML_CMS_CONFIG);
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(
+            readFileSync(
+                join(cwd, ".github", "workflows", "i18n-translate.yml"),
+                "utf-8",
+            ),
+        ) as YamlDoc;
+        expect(doc.env.TARGET_LANGS).toBe(YAML_TARGET_LANGS);
+        expect(doc.env.CONFIG_FILE).toBe("public/admin/config.yml");
+        expect(doc.env.I18N_STRUCTURE).toBe("multiple_folders");
+    });
+
+    it("the CI validator agrees with the CLI on unquoted YAML lists", () => {
+        expect(runValidator(YAML_CMS_CONFIG, YAML_TARGET_LANGS).code).toBe(0);
+        expect(runValidator(YAML_CMS_CONFIG, "zh").code).toBe(1);
+    });
+});
+
+describe("init:i18n — configurable translation commit author (0.4.5)", () => {
+    it("fills the author placeholders from --commit-author", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+
+        runInitI18n(
+            ["--commit-author", "liangningcn <liangningcn@users.noreply.github.com>"],
+            cwd,
+        );
+
+        const raw = readFileSync(
+            join(cwd, ".github", "workflows", "i18n-translate.yml"),
+            "utf-8",
+        );
+        const doc = jsYaml.load(raw) as YamlDoc;
+        expect(doc.env.COMMIT_AUTHOR_NAME).toBe("liangningcn");
+        expect(doc.env.COMMIT_AUTHOR_EMAIL).toBe(
+            "liangningcn@users.noreply.github.com",
+        );
+        expect(raw).not.toContain("__COMMIT_AUTHOR_");
+        expect(raw).not.toContain("i18n-bot");
+    });
+
+    it("leaves the placeholders empty when no author is configured", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(
+            readFileSync(
+                join(cwd, ".github", "workflows", "i18n-translate.yml"),
+                "utf-8",
+            ),
+        ) as YamlDoc;
+        expect(doc.env.COMMIT_AUTHOR_NAME).toBe("");
+        expect(doc.env.COMMIT_AUTHOR_EMAIL).toBe("");
+    });
+
+    it("preserves a hand-picked author across template upgrades", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+
+        runInitI18n(
+            ["--commit-author", "liangningcn <liangningcn@users.noreply.github.com>"],
+            cwd,
+        );
+
+        const workflowPath = join(cwd, ".github", "workflows", "i18n-translate.yml");
+        // Simulate the previous release's snapshot: same author, older marker.
+        writeFileSync(
+            workflowPath,
+            readFileSync(workflowPath, "utf-8").replace(
+                /template v[\d.]+/g,
+                "template v0.4.4",
+            ),
+        );
+
+        runInitI18n(["--no-backup"], cwd);
+
+        const doc = jsYaml.load(readFileSync(workflowPath, "utf-8")) as YamlDoc;
+        expect(doc.env.COMMIT_AUTHOR_EMAIL).toBe(
+            "liangningcn@users.noreply.github.com",
+        );
+        expect(doc.env.TEMPLATE_VERSION).toBe(I18N_TEMPLATE_VERSION);
+        expect(existsSync(`${workflowPath}.bak`)).toBe(false);
+    });
+});
+
+describe("init:i18n — postinstall hook (0.4.5)", () => {
+    it("is a silent no-op in repositories that never enabled i18n", () => {
+        const cwd = makeTempDir();
+        const console_ = captureConsole();
+
+        try {
+            expect(() => runInitI18n(["--postinstall"], cwd)).not.toThrow();
+            expect(console_.log).toHaveLength(0);
+            expect(console_.error).toHaveLength(0);
+            for (const rel of I18N_GENERATED_FILES) {
+                expect(existsSync(join(cwd, rel))).toBe(false);
+            }
+        } finally {
+            console_.restore();
+        }
+    });
+
+    it("upgrades stale snapshots without .bak files", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+        runInitI18n([], cwd);
+
+        for (const rel of I18N_GENERATED_FILES) {
+            const path = join(cwd, rel);
+            writeFileSync(
+                path,
+                readFileSync(path, "utf-8").replace(
+                    /template v[\d.]+/g,
+                    "template v0.4.4",
+                ),
+            );
+        }
+
+        const console_ = captureConsole();
+
+        try {
+            expect(() => runInitI18n(["--postinstall"], cwd)).not.toThrow();
+        } finally {
+            console_.restore();
+        }
+
+        for (const rel of I18N_GENERATED_FILES) {
+            const path = join(cwd, rel);
+            expect(readFileSync(path, "utf-8")).toContain(
+                `template v${I18N_TEMPLATE_VERSION}`,
+            );
+            expect(existsSync(`${path}.bak`)).toBe(false);
+        }
+    });
+
+    it("never breaks install when the CMS config cannot be parsed", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
+        runInitI18n([], cwd);
+        // Config disappears (e.g. sparse CI checkout): warn, do not exit(1).
+        rmSync(join(cwd, "sveltia-cms.config.mjs"));
+
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code: number,
+        ) => {
+            throw new Error(`process.exit(${String(code)})`);
+        }) as never);
+        const console_ = captureConsole();
+
+        try {
+            expect(() => runInitI18n(["--postinstall"], cwd)).not.toThrow();
+            expect(exitSpy).not.toHaveBeenCalled();
+            expect(console_.error.join("\n")).toContain("postinstall 未能更新");
+        } finally {
+            console_.restore();
+            exitSpy.mockRestore();
+        }
+    });
+});

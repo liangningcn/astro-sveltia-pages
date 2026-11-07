@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Must match `version` in package.json (guarded by tests). */
-export const I18N_TEMPLATE_VERSION = "0.4.4";
+export const I18N_TEMPLATE_VERSION = "0.4.5";
 
 export const I18N_TEMPLATE_MARKER = "astro-sveltia-pages i18n template v";
 
@@ -26,6 +26,13 @@ export const I18N_GENERATED_FILES = [
 /** pnpm is the documented package manager for consumers. */
 export const I18N_UPGRADE_COMMAND = "pnpm exec astro-sveltia-pages init:i18n";
 export const I18N_CHECK_COMMAND = "pnpm exec astro-sveltia-pages init:i18n --check";
+/**
+ * Package.json `postinstall` hook. Use the dist path directly: pnpm links the
+ * bin shim *after* lifecycle scripts on some Windows/junction setups, while
+ * the file itself is already present in node_modules at that point.
+ */
+export const I18N_POSTINSTALL_COMMAND =
+    "node ./node_modules/astro-sveltia-pages/dist/cli.mjs init:i18n --postinstall";
 
 /**
  * The canonical upgrade notice. Every surface renders these exact lines so the

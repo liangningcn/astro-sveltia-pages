@@ -378,8 +378,9 @@ export const collections = {
         pnpm exec astro-sveltia-pages init:i18n
         ```
 
-        它会自动探测 `sveltia-cms.config.mjs` / `sveltia.config.mjs`
-        （可用 `--config <path>` 覆盖），读取
+        它会自动探测 `sveltia-cms.config.mjs` / `sveltia.config.mjs`，
+        0.4.5 起也支持经典 YAML 配置 `public/admin/config.yml`
+        （无引号的 `locales: [en, fr]` 同样能解析；可用 `--config <path>` 覆盖），读取
         `i18n.default_locale`、`i18n.locales` 与 `i18n.structure`，填充模板占位符，
         并写出三份文件（0.4.0 起**不再解析集合**，是否翻译由每篇 md 的 frontmatter 决定）：
 
@@ -395,8 +396,12 @@ export const collections = {
         - `--content-root <path>` — 内容根目录（默认 `src/content`）
         - `--default-locale <lang>` — 源语言（默认 `en`）
         - `--project-name <name>` — 用于术语表标题
+        - `--commit-author "Name <email>"` — 固定译文 commit 的署名（见下文）
         - `--force` — 覆盖已存在的文件
         - `--check` — 只校验生成文件是否为最新版本（过期则非零退出，可用于 CI）
+        - `--no-backup` — 升级时不生成 `*.bak`（git 历史即备份）
+        - `--postinstall` — 供 `package.json` 钩子使用：未启用 i18n 时静默跳过、
+          只升级过期文件、不产生 `.bak`、任何异常都降级为告警而不阻断 install
 
         成功执行时**绝不会没有输出**：每份文件会打印一行 `已写入 …`（或
         `⬆ 已升级 …`），随后输出 `i18n 自动翻译已初始化（模板 …，源语言 … → …）`
@@ -416,6 +421,41 @@ export const collections = {
 > `astro dev` / `astro build` 时主动告警；自 0.3.6 起 workflow 会在 CI 内自检模板版本，不一致直接失败。
 > 可在 CI 中加入 `pnpm exec astro-sveltia-pages init:i18n --check` 自动拦截过期模板
 > （或设置 `i18nTemplateCheck: "error"`）。
+
+**升级自动化（0.4.5 起，推荐）**：把「升级后手动重跑」变成不需要记的事，在
+`package.json` 加一行钩子即可：
+
+```json
+"scripts": {
+    "postinstall": "node ./node_modules/astro-sveltia-pages/dist/cli.mjs init:i18n --postinstall"
+}
+```
+
+> **本地 `pnpm add` / `pnpm install`，postinstall 自动跑；改动随升级那次 commit 进入仓库。**
+
+钩子是幂等的：模板已是最新版时一个字节都不写；仓库没启用 i18n（三份文件都不存在）
+时静默跳过；升级不生成 `.bak`；配置缺失等异常只打印告警，**绝不阻断 install**。
+用 `dist/cli.mjs` 而不是 bin shim，是为了避开 pnpm 在部分 Windows/junction 环境下
+先跑生命周期脚本、后链接 `.bin` 的时序问题。
+
+> ⚠️ CI 里 postinstall 同样会跑，并会把 runner 中的副本升级到最新，因此之后
+> 再跑 `--check` 会"通过"却掩盖仓库里仍是旧快照。CI 闸门请改用
+> `git diff --exit-code -- .github/workflows/i18n-translate.yml i18n/glossary.md scripts/remap-translations.sh`：
+> install 一旦改了文件就立刻失败，提示把三份快照随升级提交。
+> 另外不要把这个命令挂到 Cloudflare / EdgeOne Pages 的 build command 上——构建容器
+> 只读且会销毁，改动进不了仓库，版本闸门照样失败。
+
+**译文提交署名（0.4.5 起）**：0.4.4 及更早把作者写死为一个固定 bot 账号，GitHub
+会按那个 noreply 邮箱把译文 commit 关联到该账号，看起来像机器人发稿。现在默认
+署名为**触发本次工作流的人**（`github.actor` + push 作者邮箱）。想固定成自己：
+
+```bash
+pnpm exec astro-sveltia-pages init:i18n --commit-author "liangningcn <liangningcn@users.noreply.github.com>"
+```
+
+也可以直接编辑生成 workflow 的 `env.COMMIT_AUTHOR_NAME` / `COMMIT_AUTHOR_EMAIL`，
+后续升级会保留已填的值。邮箱需是 GitHub 账号关联的邮箱（推荐
+`username@users.noreply.github.com`），否则只显示名字、不会关联到账号。
 
 2.  在仓库添加 GitHub Secret（**Settings → Secrets and variables → Actions → New repository secret**）：
 
