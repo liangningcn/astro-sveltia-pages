@@ -378,13 +378,17 @@ export const collections = {
         pnpm exec astro-sveltia-pages init:i18n
         ```
 
-        它会自动探测 `sveltia-cms.config.mjs`（可用 `--config <path>` 覆盖），读取
+        它会自动探测 `sveltia-cms.config.mjs` / `sveltia.config.mjs`
+        （可用 `--config <path>` 覆盖），读取
         `i18n.default_locale`、`i18n.locales` 与 `i18n.structure`，填充模板占位符，
         并写出三份文件（0.4.0 起**不再解析集合**，是否翻译由每篇 md 的 frontmatter 决定）：
 
         - `.github/workflows/i18n-translate.yml`
         - `i18n/glossary.md`
         - `scripts/remap-translations.sh`
+
+        只有 `i18n.locales` 会用来生成 `TARGET_LANGS`；顶层 `locale`（CMS 界面语言，
+        例如 `locale: 'zh'`）与 `default_locale` 都不会被当作语言列表。
 
         可用参数：
 

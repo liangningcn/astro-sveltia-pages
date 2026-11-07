@@ -383,7 +383,8 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             pnpm exec astro-sveltia-pages init:i18n
             ```
 
-            It auto-detects `sveltia-cms.config.mjs` (override with `--config <path>`), reads
+            It auto-detects `sveltia-cms.config.mjs` / `sveltia.config.mjs`
+            (override with `--config <path>`), reads
             `i18n.default_locale`, `i18n.locales` and `i18n.structure`, fills the
             template placeholders, and writes three files. Since 0.4.0 it **no longer
             parses collections** — each Markdown file decides for itself:
@@ -391,6 +392,9 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             - `.github/workflows/i18n-translate.yml`
             - `i18n/glossary.md`
             - `scripts/remap-translations.sh`
+
+            Only `i18n.locales` feeds `TARGET_LANGS`. A top-level `locale` (the CMS
+            UI language, e.g. `locale: 'zh'`) and `default_locale` are not locales.
 
             Useful flags:
 

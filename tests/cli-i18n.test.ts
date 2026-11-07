@@ -760,6 +760,176 @@ describe("init:i18n — deleted EN sources (0.4.3)", () => {
     });
 });
 
+// 0.4.5: `locale: 'zh'` at the top level is Sveltia's CMS **UI** language,
+// not a content locale. The old whole-file /locale:/ scan returned early on
+// that single match, so array-form configs produced TARGET_LANGS=zh and the
+// real 14 target languages were silently skipped (found in the topq repo).
+const TOPQ_UI_LOCALE_CONFIG = `// CMS 后台界面语言：locale: 'zh'
+export const sveltiaOptions = {
+  locale: 'zh',
+  extraConfig: {
+    i18n: {
+      structure: 'multiple_folders',
+      locales: ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'ko', 'ar', 'tr', 'nl', 'pl', 'vi', 'th'],
+      default_locale: 'en',
+    },
+  },
+  collections: [{ name: 'blog', folder: 'src/content/blog', i18n: true }],
+};
+`;
+
+const TOPQ_TARGETS = "ar,de,es,fr,it,ja,ko,nl,pl,pt,ru,th,tr,vi";
+
+/** Extracts the inline CI validator so tests exercise the real YAML snippet. */
+function validatorScript(): string {
+    const template = readFileSync(
+        fileURLToPath(new URL("../templates/i18n/i18n-translate.yml", import.meta.url)),
+        "utf-8",
+    );
+    const doc = jsYaml.load(template) as {
+        jobs: { detect: { steps: { name?: string; run?: string }[] } };
+    };
+    const step = doc.jobs.detect.steps.find(
+        (item) => item.name === "Validate TARGET_LANGS against Sveltia config",
+    );
+
+    if (!step?.run) {
+        throw new Error("Validate TARGET_LANGS step is missing");
+    }
+
+    return step.run
+        .replace(/\r\n/g, "\n")
+        .replace(/^\s*node <<'NODE'\n/, "")
+        .replace(/\n\s*NODE\s*$/, "");
+}
+
+function runValidator(configText: string, targetLangs: string) {
+    const logs: string[] = [];
+    const errors: string[] = [];
+    let code = 0;
+
+    try {
+        runInNewContext(validatorScript(), {
+            require: (name: string) => {
+                if (name === "fs") {
+                    return { existsSync: () => true, readFileSync: () => configText };
+                }
+
+                throw new Error(`unexpected require: ${name}`);
+            },
+            process: {
+                env: { CONFIG_FILE: "sveltia.config.mjs", TARGET_LANGS: targetLangs },
+                exit: (value: number) => {
+                    code = value;
+                    throw new Error(`VM_EXIT_${String(value)}`);
+                },
+            },
+            console: {
+                log: (...args: unknown[]) => logs.push(args.join(" ")),
+                error: (...args: unknown[]) => errors.push(args.join(" ")),
+            },
+        });
+    } catch (error) {
+        if (!String(error).includes("VM_EXIT_")) {
+            throw error;
+        }
+    }
+
+    return { code, logs, errors };
+}
+
+describe("init:i18n — CMS UI locale is not a content locale", () => {
+    it("keeps all 14 target languages and auto-detects sveltia.config.mjs", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia.config.mjs"), TOPQ_UI_LOCALE_CONFIG);
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        expect(doc.env.TARGET_LANGS).toBe(TOPQ_TARGETS);
+        expect(doc.env.CONFIG_FILE).toBe("sveltia.config.mjs");
+    });
+
+    it("also accepts a constant-valued CMS locale (no workaround needed)", () => {
+        const cwd = makeTempDir();
+        const config = TOPQ_UI_LOCALE_CONFIG.replace(
+            "  locale: 'zh',",
+            "  locale: CMS_LOCALE,",
+        ).replace(
+            "export const sveltiaOptions",
+            "const CMS_LOCALE = 'zh';\nexport const sveltiaOptions",
+        );
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), config);
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        expect(doc.env.TARGET_LANGS).toBe(TOPQ_TARGETS);
+    });
+
+    it("ignores locale / locales words written inside comments", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            `// locale: 'xx'\n// locales: ['zz']\n/* default_locale: 'zz' */\nexport default {\n  i18n: { default_locale: 'en', locales: ['en', 'fr', 'de'] },\n};\n`,
+        );
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        expect(doc.env.TARGET_LANGS).toBe("de,fr");
+    });
+
+    it("does not mix object-form locales with the CMS UI locale", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            `export default {\n  locale: 'zh',\n  i18n: {\n    default_locale: 'en',\n    locales: [{ locale: 'en', label: 'English' }, { locale: 'fr', label: 'Français' }],\n  },\n};\n`,
+        );
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        expect(doc.env.TARGET_LANGS).toBe("fr");
+    });
+
+    it("fails loudly when the parsed locales omit default_locale", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            `export default { i18n: { default_locale: 'en', locales: ['fr'] } };\n`,
+        );
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code: number,
+        ) => {
+            throw new Error(`process.exit(${String(code)})`);
+        }) as never);
+        const console_ = captureConsole();
+
+        try {
+            expect(() => runInitI18n([], cwd)).toThrow(/process\.exit\(1\)/);
+            expect(console_.error.join("\n")).toContain("不包含 default_locale");
+        } finally {
+            console_.restore();
+            exitSpy.mockRestore();
+        }
+    });
+
+    it("the inline CI validator agrees with the CLI on the topq config", () => {
+        const result = runValidator(TOPQ_UI_LOCALE_CONFIG, TOPQ_TARGETS);
+
+        expect(result.code).toBe(0);
+        expect(result.logs.join("\n")).toContain("语言列表一致");
+    });
+
+    it("the inline CI validator rejects the old TARGET_LANGS=zh mistake", () => {
+        const result = runValidator(TOPQ_UI_LOCALE_CONFIG, "zh");
+
+        expect(result.code).toBe(1);
+        expect(result.errors.join("\n")).toContain("语言列表不一致");
+    });
+});
+
 function captureConsole(): { log: string[]; error: string[]; restore: () => void } {
     const log: string[] = [];
     const error: string[] = [];

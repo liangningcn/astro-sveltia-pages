@@ -364,3 +364,35 @@ describe("i18n workflow 0.3.6 regression guards", () => {
         expect(workflow).toContain("installed = m[0]");
     });
 });
+
+describe("i18n workflow CMS UI locale parsing guards", () => {
+    const workflow = readFileSync(I18N_TEMPLATES.workflow, "utf-8");
+    const cli = readFileSync(
+        fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
+        "utf-8",
+    );
+
+    it("keeps CLI and CI locale parsing on the same algorithm", () => {
+        expect(cli).toContain("function extractLocalesBlock");
+        expect(cli).toContain("function stripConfigComments");
+        expect(cli).toContain("block.matchAll(/(?<![\\w])locale");
+        expect(workflow).toContain("const localesBlock = s =>");
+        expect(workflow).toContain("const parseLocales = s =>");
+        expect(workflow).toContain("b.matchAll(/(?<![\\w])locale");
+    });
+
+    it("never falls back to a whole-file /locale:/ scan", () => {
+        // That scan treated the CMS UI `locale: 'zh'` as the language list.
+        expect(workflow).not.toContain("(?:^|[{,\\s])locale:");
+        expect(cli).not.toContain("(?:^|[{,\\s])locale:");
+    });
+
+    it("fails loudly when locales omit default_locale", () => {
+        expect(workflow).toContain("if (!locs.includes(dl[1]))");
+        expect(cli).toContain("if (!rawLocales.includes(defaultLocale))");
+    });
+
+    it("auto-detects the shorter sveltia.config.mjs config name", () => {
+        expect(cli).toContain('"sveltia.config.mjs"');
+    });
+});

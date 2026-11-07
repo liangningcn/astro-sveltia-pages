@@ -228,6 +228,14 @@ async function buildI18nTemplates() {
             "tr '[:upper:]' '[:lower:]'",
             "pelikhan lowercases {{lang}} in output filenames",
         ],
+        [
+            "const localesBlock = s =>",
+            "CI validator parses only the locales: [...] block, not CMS UI locale",
+        ],
+        [
+            "if (!locs.includes(dl[1]))",
+            "CI validator rejects a locale list missing default_locale",
+        ],
         ["Verify i18n template version", "CI-side stale-template gate (0.3.6)"],
         [
             'TEMPLATE_VERSION: "__TEMPLATE_VERSION__"',

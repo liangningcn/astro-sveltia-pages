@@ -266,18 +266,54 @@ jobs:
                   const fs = require('fs');
                   const p = process.env.CONFIG_FILE;
                   if (!p || !fs.existsSync(p)) { console.log('CONFIG_FILE 未设置/不存在，跳过校验'); process.exit(0); }
-                  const s = fs.readFileSync(p, 'utf8');
-                  const dl = s.match(/default_locale:\s*['"](\w+)['"]/);
-                  // 兼容 locales: ["en", "fr"] 与 locales: [{ locale: "en", label: "..." }] 两种写法。
-                  // (?:^|[{,\s]) 防止 /locale:/ 误匹配 default_locale 的尾部；
-                  // (?<![\w]) 防止误匹配集合里的 initial_locales，同时允许单行内联配置。
-                  const localeKeys = [...s.matchAll(/(?:^|[{,\s])locale:\s*['"]([\w-]+)['"]/g)].map(m => m[1]);
-                  let locs = localeKeys;
-                  if (locs.length === 0) {
-                    const block = s.match(/(?<![\w])locales:\s*\[([^\]]*)\]/);
-                    if (block) locs = [...block[1].matchAll(/['"]([\w-]+)['"]/g)].map(m => m[1]);
-                  }
+
+                  // 与 CLI 的 extractLocales 保持同一算法：只在 locales: [...] 列表块内解析。
+                  // 顶层 `locale: 'zh'` 是 CMS 界面语言，不是内容语言；全文扫 /locale:/
+                  // 会让它短路掉真正的语言列表（0.4.4 在 topq 上生成了 TARGET_LANGS=zh）。
+                  // 修改此处时请同步 src/cli.ts，模板静态守卫会检查两边的关键标记。
+                  const stripComments = s => {
+                    let out = '', quote = '';
+                    for (let i = 0; i < s.length; i++) {
+                      const c = s[i], n = s[i + 1] || '';
+                      if (quote) { out += c; if (c === '\\') { out += n; i++; } else if (c === quote) quote = ''; continue; }
+                      if (c === "'" || c === '"' || c === '`') { quote = c; out += c; continue; }
+                      if (c === '/' && n === '/') { while (i < s.length && s[i] !== '\n') i++; out += '\n'; continue; }
+                      if (c === '/' && n === '*') { i += 2; while (i < s.length && !(s[i] === '*' && s[i+1] === '/')) i++; i++; out += ' '; continue; }
+                      out += c;
+                    }
+                    return out;
+                  };
+                  const localesBlock = s => {
+                    const m = /(?<![\w])locales\s*:\s*\[/.exec(s);
+                    if (!m) return null;
+                    const start = m.index + m[0].length - 1;
+                    let depth = 0, quote = '';
+                    for (let i = start; i < s.length; i++) {
+                      const c = s[i];
+                      if (quote) { if (c === '\\') { i++; continue; } if (c === quote) quote = ''; continue; }
+                      if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+                      if (c === '[') depth++;
+                      else if (c === ']') { depth--; if (depth === 0) return s.slice(start + 1, i); }
+                    }
+                    return null;
+                  };
+                  const parseLocales = s => {
+                    const b = localesBlock(s);
+                    if (b === null) return [];
+                    const keys = [...b.matchAll(/(?<![\w])locale\s*:\s*['"]([\w-]+)['"]/g)].map(m => m[1]);
+                    if (keys.length) return [...new Set(keys)];
+                    if (b.includes('{')) return [];
+                    return [...new Set([...b.matchAll(/['"]([\w-]+)['"]/g)].map(m => m[1]))];
+                  };
+
+                  const src = stripComments(fs.readFileSync(p, 'utf8'));
+                  const dl = src.match(/default_locale:\s*['"](\w+)['"]/);
+                  const locs = parseLocales(src);
                   if (!dl || !locs.length) { console.log('未在配置中找到 locales，跳过校验'); process.exit(0); }
+                  if (!locs.includes(dl[1])) {
+                    console.error('❌ 解析到的语言列表 ' + locs.join(',') + ' 不含 default_locale=' + dl[1] + '；请检查 i18n.locales 写法。');
+                    process.exit(1);
+                  }
                   const target = [...new Set(locs.filter(l => l !== dl[1]))].sort();
                   const want = (process.env.TARGET_LANGS || '').split(',').map(x => x.trim()).filter(Boolean).sort();
                   const a = JSON.stringify(target), b = JSON.stringify(want);

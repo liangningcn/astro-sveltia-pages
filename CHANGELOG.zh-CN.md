@@ -8,6 +8,28 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## Unreleased
+
+### 修复
+
+- **`locale: 'zh'`（CMS 界面语言）被误当成语言列表。** `init:i18n` 与工作流里的
+  `Validate TARGET_LANGS` 都曾全文扫描 `/locale:/`：只要配置里出现顶层
+  `locale: 'zh'`，就会优先返回 `['zh']` 并跳过真正的 `i18n.locales` 数组，
+  生成 `TARGET_LANGS: "zh"`，其余 14 个目标语言被静默跳过（topq 实测）。
+  现改为**只在 `locales: [...]` 列表块内解析**（括号平衡，兼容数组与对象数组），
+  解析前先剥离注释；CLI 与 CI 校验保持同一算法，并有静态守卫防止两边漂移。
+- 新增闸门：解析出的语言列表若不包含 `default_locale`，CLI 与 CI 都会明确失败，
+  不再静默生成错误的语言清单。
+- `init:i18n` 现在也会自动探测 `sveltia.config.mjs` / `.js`，此前这类项目必须
+  手动传 `--config`。
+
+### 迁移
+
+- Sveltia 配置无需更改：`locale: 'zh'` 是合法的 CMS 界面语言选项，不必再改成
+  常量来绕过。
+- 修复随下一个版本发布；升级依赖后照例重跑
+  `pnpm exec astro-sveltia-pages init:i18n` 并提交三份生成文件。
+
 ## 0.4.4
 
 ### 修复

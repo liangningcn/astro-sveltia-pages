@@ -10,6 +10,30 @@ section below.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **The CMS UI language `locale: 'zh'` was parsed as the locale list.** Both
+  `init:i18n` and the workflow's `Validate TARGET_LANGS` step scanned the whole
+  config for `/locale:/`. A top-level `locale: 'zh'` short-circuited that scan,
+  so the real `i18n.locales` array was ignored and `TARGET_LANGS` became `zh`
+  while the other 14 locales were silently skipped (reproduced on topq).
+  Parsing now happens **only inside the `locales: [...]` block** (bracket
+  balanced, both array and object-array forms), after stripping comments. The
+  CLI and the CI validator use the same algorithm, guarded by static checks.
+- A parsed locale list that does not contain `default_locale` now fails loudly
+  in both the CLI and CI instead of producing a bogus language list.
+- `init:i18n` also auto-detects `sveltia.config.mjs` / `.js`; those projects
+  previously had to pass `--config` manually.
+
+### Migration
+
+- No Sveltia config change is needed: `locale: 'zh'` is a legitimate CMS UI
+  option and no longer needs the constant workaround.
+- Ships with the next release. After upgrading, rerun
+  `pnpm exec astro-sveltia-pages init:i18n` and commit the three generated files.
+
 ## 0.4.4
 
 ### Fixed

@@ -293,29 +293,145 @@ function extractDefaultLocale(text: string): string {
     return match ? match[1] : "";
 }
 
+/**
+ * Removes JS line and block comments while keeping string literals intact.
+ * Config headers often mention `locale: 'zh'` in prose; a whole-file scan used
+ * to treat those words as real configuration.
+ */
+function stripConfigComments(text: string): string {
+    let out = "";
+    let quote = "";
+
+    for (let i = 0; i < text.length; i += 1) {
+        const char = text[i];
+        const next = text[i + 1] ?? "";
+
+        if (quote) {
+            out += char;
+
+            if (char === "\\") {
+                out += next;
+                i += 1;
+            } else if (char === quote) {
+                quote = "";
+            }
+
+            continue;
+        }
+
+        if (char === "'" || char === '"' || char === "`") {
+            quote = char;
+            out += char;
+            continue;
+        }
+
+        if (char === "/" && next === "/") {
+            while (i < text.length && text[i] !== "\n") {
+                i += 1;
+            }
+            out += "\n";
+            continue;
+        }
+
+        if (char === "/" && next === "*") {
+            i += 2;
+
+            while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) {
+                i += 1;
+            }
+
+            i += 1;
+            out += " ";
+            continue;
+        }
+
+        out += char;
+    }
+
+    return out;
+}
+
+/**
+ * Returns the contents of the first `locales: [...]` list. The scan is
+ * bracket-balanced so object-form lists and nested arrays both work, and the
+ * negative lookbehind keeps collection-level `initial_locales` out.
+ */
+function extractLocalesBlock(text: string): string | null {
+    const match = /(?<![\w])locales\s*:\s*\[/.exec(text);
+
+    if (!match) {
+        return null;
+    }
+
+    const start = match.index + match[0].length - 1;
+    let depth = 0;
+    let quote = "";
+
+    for (let i = start; i < text.length; i += 1) {
+        const char = text[i];
+
+        if (quote) {
+            if (char === "\\") {
+                i += 1;
+                continue;
+            }
+
+            if (char === quote) {
+                quote = "";
+            }
+
+            continue;
+        }
+
+        if (char === "'" || char === '"' || char === "`") {
+            quote = char;
+            continue;
+        }
+
+        if (char === "[") {
+            depth += 1;
+        } else if (char === "]") {
+            depth -= 1;
+
+            if (depth === 0) {
+                return text.slice(start + 1, i);
+            }
+        }
+    }
+
+    return null;
+}
+
 function extractLocales(text: string): string[] {
-    // Object form: locales: [{ locale: "en", label: "..." }, ...]
-    // The `(?:^|[{,\s])` guard prevents matching `default_locale: "en"` — an
-    // unguarded /locale:/ also matches the tail of `default_locale`, which used
-    // to make array-form configs resolve to just the default locale.
+    // Only look INSIDE the `locales:` list. A top-level `locale: 'zh'` is
+    // Sveltia's CMS UI language, not a content locale. 0.4.4 scanned the whole
+    // file for /locale:/ and returned early on that single match, which made
+    // array-form configs resolve to TARGET_LANGS=zh (found in topq).
+    // Keep this in sync with the inline validator in i18n-translate.yml.
+    const block = extractLocalesBlock(text);
+
+    if (block === null) {
+        return [];
+    }
+
+    // Object form: locales: [{ locale: 'en', label: 'English' }, ...]
     const objectKeys = [
-        ...text.matchAll(/(?:^|[{,\s])locale:\s*['"]([\w-]+)['"]/g),
-    ].map((m) => m[1]);
+        ...block.matchAll(/(?<![\w])locale\s*:\s*['"]([\w-]+)['"]/g),
+    ].map((match) => match[1]);
 
     if (objectKeys.length > 0) {
-        return objectKeys;
+        return [...new Set(objectKeys)];
     }
 
-    // Array form: locales: ["en", "fr", "de"]. The negative lookbehind keeps
-    // `initial_locales` out while still allowing an inline single-line config
-    // such as `i18n: { default_locale: 'en', locales: ['en','fr'] }`.
-    const block = text.match(/(?<![\w])locales:\s*\[([^\]]*)\]/);
-
-    if (block) {
-        return [...block[1].matchAll(/['"]([\w-]+)['"]/g)].map((m) => m[1]);
+    // Bare array form: ['en', 'fr']. When the block contains objects but no
+    // `locale:` key, refuse to guess from labels such as 'English'.
+    if (block.includes("{")) {
+        return [];
     }
 
-    return [];
+    return [
+        ...new Set([...block.matchAll(/['"]([\w-]+)['"]/g)].map((match) => match[1])),
+    ];
 }
 
 function extractStructure(text: string): string {
@@ -345,8 +461,14 @@ function readI18nConfigPath(cwd: string, configArg: string | undefined): string 
         : [
               "sveltia-cms.config.mjs",
               "sveltia-cms.config.js",
+              // Real consumer repos also use the shorter `sveltia.config.mjs`
+              // name (e.g. topq). Previously --config was mandatory there.
+              "sveltia.config.mjs",
+              "sveltia.config.js",
               "src/sveltia-cms.config.mjs",
               "src/sveltia-cms.config.js",
+              "src/sveltia.config.mjs",
+              "src/sveltia.config.js",
           ];
 
     for (const candidate of candidates) {
@@ -358,8 +480,8 @@ function readI18nConfigPath(cwd: string, configArg: string | undefined): string 
     }
 
     fail(
-        "未找到 Sveltia CMS 配置文件（默认查找 sveltia-cms.config.mjs）。\n" +
-            "      请通过 --config <path> 指定，或在项目根目录创建 `sveltia-cms.config.mjs`（见 README）。",
+        "未找到 Sveltia CMS 配置文件（默认查找 sveltia-cms.config.mjs / sveltia.config.mjs）。\n" +
+            "      请通过 --config <path> 指定，或在项目根目录创建其中一个（见 README）。",
     );
 }
 
@@ -377,7 +499,8 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
 
     const configPath = readI18nConfigPath(cwd, configArg);
     const configRelative = relative(cwd, configPath) || "sveltia-cms.config.mjs";
-    const configText = readFileSync(configPath, "utf-8");
+    // Comments may mention `locale: 'xx'` in prose; strip them before parsing.
+    const configText = stripConfigComments(readFileSync(configPath, "utf-8"));
 
     const rawLocales = extractLocales(configText);
 
@@ -389,6 +512,17 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
     }
 
     const defaultLocale = extractDefaultLocale(configText) || requestedDefaultLocale;
+
+    // Sveltia requires locales to include default_locale. If they don't, the
+    // parser produced a wrong list (0.4.4 read the CMS UI `locale: 'zh'`),
+    // so fail loudly instead of generating a bogus TARGET_LANGS.
+    if (!rawLocales.includes(defaultLocale)) {
+        fail(
+            `解析到的语言列表 [${rawLocales.join(", ")}] 不包含 default_locale=${defaultLocale}。\n` +
+                "      请确认 i18n.locales 是数组或对象数组；CMS 界面语言 `locale: 'zh'` 不会被当作语言列表。",
+        );
+    }
+
     const structure = extractStructure(configText);
     const targetLangs = rawLocales.filter((lang) => lang !== defaultLocale).sort();
 
