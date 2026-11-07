@@ -450,7 +450,7 @@ export const collections = {
 署名为**触发本次工作流的人**（`github.actor` + push 作者邮箱）。想固定成自己：
 
 ```bash
-pnpm exec astro-sveltia-pages init:i18n --commit-author "liangningcn <liangningcn@users.noreply.github.com>"
+pnpm exec astro-sveltia-pages init:i18n --commit-author "你的名字 <you@users.noreply.github.com>"
 ```
 
 也可以直接编辑生成 workflow 的 `env.COMMIT_AUTHOR_NAME` / `COMMIT_AUTHOR_EMAIL`，

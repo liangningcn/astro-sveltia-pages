@@ -25,14 +25,14 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   commit 模式与 PR 模式使用同一身份。
 - **支持经典 YAML CMS 配置。** `init:i18n` 自动探测 `public/admin/config.yml`，
   兼容无引号的 `locales: [en, fr]`、`default_locale: en`、`structure: multiple_folders`
-  与 `#` 注释；CI 的 `Validate TARGET_LANGS` 使用同一算法（reforteha 实测）。
+  与 `#` 注释；CI 的 `Validate TARGET_LANGS` 使用同一算法（已用经典 YAML 配置实测）。
 
 ### 修复
 
 - **`locale: 'zh'`（CMS 界面语言）被误当成语言列表。** `init:i18n` 与工作流里的
   `Validate TARGET_LANGS` 都曾全文扫描 `/locale:/`：只要配置里出现顶层
   `locale: 'zh'`，就会优先返回 `['zh']` 并跳过真正的 `i18n.locales` 数组，
-  生成 `TARGET_LANGS: "zh"`，其余 14 个目标语言被静默跳过（topq 实测）。
+  生成 `TARGET_LANGS: "zh"`，其余 14 个目标语言被静默跳过（已用多语言配置实测）。
   现改为**只在 `locales: [...]` 列表块内解析**（括号平衡，兼容数组与对象数组），
   解析前先剥离注释；CLI 与 CI 校验保持同一算法，并有静态守卫防止两边漂移。
 - 新增闸门：解析出的语言列表若不包含 `default_locale`，CLI 与 CI 都会明确失败，
@@ -47,7 +47,7 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 ### 迁移
 
 - Sveltia 配置无需更改：`locale: 'zh'` 是合法的 CMS 界面语言选项，不必再改成
-  常量来绕过（topq 的 `CMS_LOCALE` 常量 hack 可以还原）。
+  常量来绕过（此前用于绕过的 `CMS_LOCALE` 常量可以还原）。
 - 升级到 0.4.5 后重跑一次 `pnpm exec astro-sveltia-pages init:i18n` 并提交三份
   生成文件；之后建议配置 `postinstall` 钩子，升级即可自动同步。
 - 想让译文 commit 显示为自己的账号，重跑时加
@@ -59,7 +59,7 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ### 修复
 
-- **译文全部翻完，却一篇都发不出去。** 实测 run `42306899199`：15 个语言各 13 条
+- **译文全部翻完，却一篇都发不出去。** 实测 run `<run-id>`：15 个语言各 13 条
   全部成功、`remap 完成：写入 15 个译文`、落盘路径校验通过；最后
   `Self-check & commit to batch branch` 报 `推送 batch 分支失败` / `exit 1`，
   publish 失败并建 issue，15 篇译文随 runner 一起被丢弃。
@@ -83,8 +83,8 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   ② GitHub Actions cache（0.4.4 起失败也保存；7 天未访问会被清理、10GB 按 LRU 淘汰）；
   ③ 每分片 artifact `translation-logs-<run_id>-<shard>`（`if: always()`，
   默认保留 90 天，**发布失败也一定在**）。
-- 本次 run `42306899199`：日志开头 `Cache not found`、结尾没有 `Cache saved`，
-  所以 ② 里没有；但 artifact `translation-logs-42306899199-0`（16 文件 / 28.7 KB）
+- 本次 run `<run-id>`：日志开头 `Cache not found`、结尾没有 `Cache saved`，
+  所以 ② 里没有；但 artifact `translation-logs-<run-id>-0`（16 文件 / 28.7 KB）
   已上传成功，15 个 `<lang>.json` 都在里面。
 - 恢复：下载该 artifact → 把 `*.json` 放进仓库根目录 `i18n-translations/` →
   重跑工作流（或 Actions → i18n-translate → Run workflow 勾 force）。命中缓存时
@@ -128,7 +128,7 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 ### 修复
 
 - **偶发「某几个语言 0 篇译文」会拖垮整次发布。** 0.4.1 的凭证修复生效后，
-  nextcharm 实测 15 个语言里 13 个成功、`de` / `pl` 失败，publish 报
+  消费方实测 15 个语言里 13 个成功、`de` / `pl` 失败，publish 报
   `译文缺失 2 项`，结果 13 篇已完成的译文也全部没有发布。
   根因在上游 `pelikhan/action-continuous-translation@v0.2.11`：它把待译节点包成
   `┌T000┐…└T000┘` 标记，要求模型用 ` ```T000 … ``` ` 代码围栏逐条返回；
@@ -178,7 +178,7 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
   `GitHub authentication required`，一篇译文都没写出，genaiscript 却仍打印
   `success` 并以 exit 0 结束 —— 直到 `Verify translations were produced` 才失败，
   且错误信息误导性地指向「检查 API Key」。
-  真实现象（nextcharm，2026-11-06）：
+  真实现象（消费方仓库，2026-11-06）：
   `Error connecting to translation model github:openai/gpt-4o: GitHub authentication required`。
 - 翻译步骤改为通过 step 级 `env:` 显式注入 `OPENAI_API_KEY`、`OPENAI_API_BASE`、
   `GENAISCRIPT_DEFAULT_MODEL`、`GENAISCRIPT_MODEL_TRANSLATION`、
@@ -281,8 +281,8 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ## 0.3.6
 
-修复 0.3.5 引入的「升级检测」缺陷。消费方仓库（`nextcharm`，运行
-`42170827866`，2026-11-06）的真实 CI 日志显示：包已经装到 0.3.5，仓库里提交的
+修复 0.3.5 引入的「升级检测」缺陷。消费方仓库（运行
+`<run-id>`，2026-11-06）的真实 CI 日志显示：包已经装到 0.3.5，仓库里提交的
 却仍是 **0.3.4 的 workflow 快照**，失败表现和 API Key 出问题几乎无法区分。
 
 ### 日志诊断

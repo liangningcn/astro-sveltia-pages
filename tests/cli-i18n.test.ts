@@ -280,7 +280,7 @@ describe("init:i18n — error handling", () => {
 
 // Array-form `locales: ["en", "fr"]` plus `default_locale: "en"` used to resolve
 // to just ["en"] because /locale:/ also matched the tail of `default_locale`.
-// This is the shape used by real consumer repos (e.g. nextcharm/charmost).
+// This is the shape used by real consumer repos (a Sveltia CMS options module).
 const ARRAY_LOCALES_CONFIG = `export default {
   i18n: {
     structure: 'multiple_folders',
@@ -763,8 +763,8 @@ describe("init:i18n — deleted EN sources (0.4.3)", () => {
 // 0.4.5: `locale: 'zh'` at the top level is Sveltia's CMS **UI** language,
 // not a content locale. The old whole-file /locale:/ scan returned early on
 // that single match, so array-form configs produced TARGET_LANGS=zh and the
-// real 14 target languages were silently skipped (found in the topq repo).
-const TOPQ_UI_LOCALE_CONFIG = `// CMS 后台界面语言：locale: 'zh'
+// real 14 target languages were silently skipped (reported by a consumer).
+const UI_LOCALE_CONFIG = `// CMS 后台界面语言：locale: 'zh'
 export const sveltiaOptions = {
   locale: 'zh',
   extraConfig: {
@@ -778,7 +778,7 @@ export const sveltiaOptions = {
 };
 `;
 
-const TOPQ_TARGETS = "ar,de,es,fr,it,ja,ko,nl,pl,pt,ru,th,tr,vi";
+const EXPECTED_TARGETS = "ar,de,es,fr,it,ja,ko,nl,pl,pt,ru,th,tr,vi";
 
 /** Extracts the inline CI validator so tests exercise the real YAML snippet. */
 function validatorScript(): string {
@@ -841,18 +841,18 @@ function runValidator(configText: string, targetLangs: string) {
 describe("init:i18n — CMS UI locale is not a content locale", () => {
     it("keeps all 14 target languages and auto-detects sveltia.config.mjs", () => {
         const cwd = makeTempDir();
-        writeFileSync(join(cwd, "sveltia.config.mjs"), TOPQ_UI_LOCALE_CONFIG);
+        writeFileSync(join(cwd, "sveltia.config.mjs"), UI_LOCALE_CONFIG);
 
         runInitI18n([], cwd);
 
         const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
-        expect(doc.env.TARGET_LANGS).toBe(TOPQ_TARGETS);
+        expect(doc.env.TARGET_LANGS).toBe(EXPECTED_TARGETS);
         expect(doc.env.CONFIG_FILE).toBe("sveltia.config.mjs");
     });
 
     it("also accepts a constant-valued CMS locale (no workaround needed)", () => {
         const cwd = makeTempDir();
-        const config = TOPQ_UI_LOCALE_CONFIG.replace(
+        const config = UI_LOCALE_CONFIG.replace(
             "  locale: 'zh',",
             "  locale: CMS_LOCALE,",
         ).replace(
@@ -864,7 +864,7 @@ describe("init:i18n — CMS UI locale is not a content locale", () => {
         runInitI18n([], cwd);
 
         const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
-        expect(doc.env.TARGET_LANGS).toBe(TOPQ_TARGETS);
+        expect(doc.env.TARGET_LANGS).toBe(EXPECTED_TARGETS);
     });
 
     it("ignores locale / locales words written inside comments", () => {
@@ -915,15 +915,15 @@ describe("init:i18n — CMS UI locale is not a content locale", () => {
         }
     });
 
-    it("the inline CI validator agrees with the CLI on the topq config", () => {
-        const result = runValidator(TOPQ_UI_LOCALE_CONFIG, TOPQ_TARGETS);
+    it("the inline CI validator agrees with the CLI on the UI-locale config", () => {
+        const result = runValidator(UI_LOCALE_CONFIG, EXPECTED_TARGETS);
 
         expect(result.code).toBe(0);
         expect(result.logs.join("\n")).toContain("语言列表一致");
     });
 
     it("the inline CI validator rejects the old TARGET_LANGS=zh mistake", () => {
-        const result = runValidator(TOPQ_UI_LOCALE_CONFIG, "zh");
+        const result = runValidator(UI_LOCALE_CONFIG, "zh");
 
         expect(result.code).toBe(1);
         expect(result.errors.join("\n")).toContain("语言列表不一致");
@@ -997,7 +997,7 @@ describe("init:i18n — configurable translation commit author (0.4.5)", () => {
         writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
 
         runInitI18n(
-            ["--commit-author", "liangningcn <liangningcn@users.noreply.github.com>"],
+            ["--commit-author", "Your Name <you@users.noreply.github.com>"],
             cwd,
         );
 
@@ -1006,10 +1006,8 @@ describe("init:i18n — configurable translation commit author (0.4.5)", () => {
             "utf-8",
         );
         const doc = jsYaml.load(raw) as YamlDoc;
-        expect(doc.env.COMMIT_AUTHOR_NAME).toBe("liangningcn");
-        expect(doc.env.COMMIT_AUTHOR_EMAIL).toBe(
-            "liangningcn@users.noreply.github.com",
-        );
+        expect(doc.env.COMMIT_AUTHOR_NAME).toBe("Your Name");
+        expect(doc.env.COMMIT_AUTHOR_EMAIL).toBe("you@users.noreply.github.com");
         expect(raw).not.toContain("__COMMIT_AUTHOR_");
         expect(raw).not.toContain("i18n-bot");
     });
@@ -1035,7 +1033,7 @@ describe("init:i18n — configurable translation commit author (0.4.5)", () => {
         writeFileSync(join(cwd, "sveltia-cms.config.mjs"), SVELTIA_CONFIG);
 
         runInitI18n(
-            ["--commit-author", "liangningcn <liangningcn@users.noreply.github.com>"],
+            ["--commit-author", "Your Name <you@users.noreply.github.com>"],
             cwd,
         );
 
@@ -1052,9 +1050,7 @@ describe("init:i18n — configurable translation commit author (0.4.5)", () => {
         runInitI18n(["--no-backup"], cwd);
 
         const doc = jsYaml.load(readFileSync(workflowPath, "utf-8")) as YamlDoc;
-        expect(doc.env.COMMIT_AUTHOR_EMAIL).toBe(
-            "liangningcn@users.noreply.github.com",
-        );
+        expect(doc.env.COMMIT_AUTHOR_EMAIL).toBe("you@users.noreply.github.com");
         expect(doc.env.TEMPLATE_VERSION).toBe(I18N_TEMPLATE_VERSION);
         expect(existsSync(`${workflowPath}.bak`)).toBe(false);
     });

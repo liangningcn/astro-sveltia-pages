@@ -435,7 +435,7 @@ function extractLocales(text: string): string[] {
     // Only look INSIDE the `locales:` list. A top-level `locale: 'zh'` is
     // Sveltia's CMS UI language, not a content locale. 0.4.4 scanned the whole
     // file for /locale:/ and returned early on that single match, which made
-    // array-form configs resolve to TARGET_LANGS=zh (found in topq).
+    // array-form configs resolve to TARGET_LANGS=zh (reported by a consumer).
     // Keep this in sync with the inline validator in i18n-translate.yml.
     const block = extractLocalesBlock(text);
 
@@ -467,7 +467,7 @@ function extractLocales(text: string): string[] {
         return quoted;
     }
 
-    // YAML bare array: `locales: [en, es, fr, de]` (reforteha's config.yml).
+    // YAML bare array: `locales: [en, es, fr, de]` (classic config.yml).
     // Only language-shaped tokens survive, so comments and stray words cannot
     // leak into TARGET_LANGS.
     return [
@@ -508,7 +508,7 @@ function readI18nConfigPath(cwd: string, configArg: string | undefined): string 
               "sveltia-cms.config.mjs",
               "sveltia-cms.config.js",
               // Real consumer repos also use the shorter `sveltia.config.mjs`
-              // name (e.g. topq). Previously --config was mandatory there.
+              // name too. Previously --config was mandatory there.
               "sveltia.config.mjs",
               "sveltia.config.js",
               "src/sveltia-cms.config.mjs",
@@ -516,7 +516,7 @@ function readI18nConfigPath(cwd: string, configArg: string | undefined): string 
               "src/sveltia.config.mjs",
               "src/sveltia.config.js",
               // Classic Decap/Sveltia sites keep the CMS config as YAML under
-              // public/admin (e.g. reforteha). 0.4.4 only understood .mjs/.js,
+              // public/admin. 0.4.4 only understood .mjs/.js,
               // so `init:i18n` refused to run on those repositories.
               "public/admin/config.yml",
               "public/admin/config.yaml",
@@ -908,7 +908,7 @@ Flags:
                   the install, and prints a reminder to commit the change.
   --no-backup     Skip *.bak copies (git history is the backup).
   --commit-author Fix the git author of translated commits, e.g.
-                  "liangningcn <liangningcn@users.noreply.github.com>".
+                  "Your Name <you@users.noreply.github.com>".
                   Empty = attribute each run to whoever triggered it.
 `;
 

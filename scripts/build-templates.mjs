@@ -337,7 +337,66 @@ async function buildI18nTemplates() {
     );
 }
 
+// Nothing in the published package may name a consumer's private repository or
+// embed a personal noreply address. The literals are assembled at runtime so
+// this guard does not flag its own source while scanning `scripts/`.
+const PRIVATE_IDENTIFIER_PARTS = [
+    ["ref", "orteha"],
+    ["char", "most"],
+    ["next", "charm"],
+    ["top", "q"],
+    ["liang", "ningcn@users.noreply.github.com"],
+];
+const PRIVACY_SCAN_FILES = [
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "CHANGELOG.zh-CN.md",
+];
+const PRIVACY_SCAN_DIRS = ["src", "templates", "scripts", "tests"];
+const TEXT_FILE = /\.(?:ts|mjs|js|md|yml|yaml|sh|json)$/;
+
+async function collectTextFiles(relativeDir, out) {
+    const entries = await readdir(join(root, relativeDir), { withFileTypes: true });
+
+    for (const entry of entries) {
+        const relative = join(relativeDir, entry.name);
+
+        if (entry.isDirectory()) {
+            await collectTextFiles(relative, out);
+        } else if (TEXT_FILE.test(entry.name)) {
+            out.push(relative);
+        }
+    }
+}
+
+async function assertNoPrivateIdentifiers() {
+    const forbidden = PRIVATE_IDENTIFIER_PARTS.map((parts) => parts.join(""));
+    const pattern = new RegExp(forbidden.join("|"), "i");
+    const files = [...PRIVACY_SCAN_FILES];
+
+    for (const dir of PRIVACY_SCAN_DIRS) {
+        await collectTextFiles(dir, files);
+    }
+
+    for (const file of files) {
+        const content = await readFile(join(root, file), "utf-8");
+        const hit = content.match(pattern);
+
+        if (hit) {
+            throw new Error(
+                `[privacy] ${file} leaks a private project/person identifier (${hit[0]}). Remove it before publishing.`,
+            );
+        }
+    }
+
+    console.log(
+        `[astro-sveltia-pages] Privacy scan passed (${files.length} tracked source/doc files).`,
+    );
+}
+
 async function main() {
+    await assertNoPrivateIdentifiers();
     await buildAuthTemplates();
     await buildI18nTemplates();
 }

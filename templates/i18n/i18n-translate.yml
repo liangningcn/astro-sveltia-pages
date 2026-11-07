@@ -182,8 +182,8 @@ env:
     # noreply 邮箱把 commit 关联到该账号（看起来像机器人发稿）。
     # 现在：留空 → 自动署名为触发本次工作流的人（github.actor + push 作者邮箱）；
     # 想固定成自己的账号 → 填 GitHub 账号关联的邮箱，例如
-    #   COMMIT_AUTHOR_NAME: "liangningcn"
-    #   COMMIT_AUTHOR_EMAIL: "liangningcn@users.noreply.github.com"
+    #   COMMIT_AUTHOR_NAME: "Your Name"
+    #   COMMIT_AUTHOR_EMAIL: "you@users.noreply.github.com"
     # 由 init:i18n 填充：--commit-author "Name <email>"；升级时会保留已填的值。
     COMMIT_AUTHOR_NAME: "__COMMIT_AUTHOR_NAME__"
     COMMIT_AUTHOR_EMAIL: "__COMMIT_AUTHOR_EMAIL__"
@@ -279,7 +279,7 @@ jobs:
 
                   // 与 CLI 的 extractLocales 保持同一算法：只在 locales: [...] 列表块内解析。
                   // 顶层 `locale: 'zh'` 是 CMS 界面语言，不是内容语言；全文扫 /locale:/
-                  // 会让它短路掉真正的语言列表（0.4.4 在 topq 上生成了 TARGET_LANGS=zh）。
+                  // 会让它短路掉真正的语言列表（0.4.4 曾因此生成 TARGET_LANGS=zh）。
                   // 修改此处时请同步 src/cli.ts，模板静态守卫会检查两边的关键标记。
                   const stripComments = s => {
                     let out = '', quote = '';

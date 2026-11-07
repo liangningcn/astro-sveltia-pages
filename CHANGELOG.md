@@ -32,7 +32,7 @@ section below.
 - **Classic YAML CMS configs are supported.** `init:i18n` auto-detects
   `public/admin/config.yml` and understands unquoted `locales: [en, fr]`,
   `default_locale: en`, `structure: multiple_folders` and `#` comments; the CI
-  `Validate TARGET_LANGS` step uses the same algorithm (verified on reforteha).
+  `Validate TARGET_LANGS` step uses the same algorithm (verified against a classic YAML CMS config).
 
 ### Fixed
 
@@ -40,7 +40,7 @@ section below.
   `init:i18n` and the workflow's `Validate TARGET_LANGS` step scanned the whole
   config for `/locale:/`. A top-level `locale: 'zh'` short-circuited that scan,
   so the real `i18n.locales` array was ignored and `TARGET_LANGS` became `zh`
-  while the other 14 locales were silently skipped (reproduced on topq).
+  while the other 14 locales were silently skipped (reproduced with a real multi-locale config).
   Parsing now happens **only inside the `locales: [...]` block** (bracket
   balanced, both array and object-array forms), after stripping comments. The
   CLI and the CI validator use the same algorithm, guarded by static checks.
@@ -56,7 +56,7 @@ section below.
 ### Migration
 
 - No Sveltia config change is needed: `locale: 'zh'` is a legitimate CMS UI
-  option and no longer needs the constant workaround (topq's `CMS_LOCALE` hack
+  option and no longer needs the constant workaround (the `CMS_LOCALE` constant hack
   can be reverted).
 - After upgrading to 0.4.5, rerun `pnpm exec astro-sveltia-pages init:i18n` once
   and commit the three generated files; then configure the `postinstall` hook so
@@ -72,7 +72,7 @@ section below.
 ### Fixed
 
 - **All 15 locales were translated, then every one of them was lost.** In run
-  `42306899199` each locale produced 13/13 strings, `remap` wrote 15 files and
+  `<run-id>` each locale produced 13/13 strings, `remap` wrote 15 files and
   the destination-layout check passed; the final `Self-check & commit to batch
 branch` step failed with "push batch branch failed" / `exit 1`, `publish`
   failed and opened an issue, and the 15 translations died with the runner.
@@ -103,9 +103,9 @@ branch` step failed with "push batch branch failed" / `exit 1`, `publish`
   failure; entries unused for 7 days are evicted, 10 GB total, LRU); (3) the
   per-shard artifact `translation-logs-<run_id>-<shard>` uploaded with
   `if: always()` — always present after a failure, retained 90 days by default.
-- For run `42306899199`: the log starts with `Cache not found` and has no
+- For run `<run-id>`: the log starts with `Cache not found` and has no
   `Cache saved` at the end, so (2) is empty. But artifact
-  `translation-logs-42306899199-0` (16 files / 28.7 KB) uploaded successfully
+  `translation-logs-<run-id>-0` (16 files / 28.7 KB) uploaded successfully
   and contains all 15 `<lang>.json` files.
 - To recover: download that artifact, put the `*.json` files into
   `i18n-translations/` at the repo root, then rerun the workflow (or use
@@ -161,7 +161,7 @@ sources` failed with "source file not found" / `exit 1`, and `publish`
 ### Fixed
 
 - **A flaky "0 translations for a couple of locales" failure discarded the
-  whole batch.** With the 0.4.1 credential fix working, a real nextcharm run
+  whole batch.** With the 0.4.1 credential fix working, a real consumer run
   produced 13 of 15 locales successfully; `de` and `pl` failed, `publish`
   reported `2 missing translations`, and all 13 finished translations were
   thrown away too. Root cause is upstream
@@ -224,7 +224,7 @@ languages` removes the `.genaiscript` response cache and the affected
   written, and genaiscript still printed `success` with exit code 0 — the
   workflow only failed later at `Verify translations were produced` with a
   misleading "15 missing translations / check the API key" message.
-  Real symptom (nextcharm, 2026-11-06): `Error connecting to translation model
+  Real symptom (a consumer repo, 2026-11-06): `Error connecting to translation model
 github:openai/gpt-4o: GitHub authentication required`.
 - The translate step now injects `OPENAI_API_KEY`, `OPENAI_API_BASE`,
   `GENAISCRIPT_DEFAULT_MODEL`, `GENAISCRIPT_MODEL_TRANSLATION` and
@@ -345,7 +345,7 @@ github:openai/gpt-4o: GitHub authentication required`.
 ## 0.3.6
 
 Bug-fix release for the _upgrade detection_ introduced in 0.3.5. A real CI log
-from a consumer repository (`nextcharm`, run `42170827866`, 2026-11-06) showed
+from a consumer repository (run `<run-id>`, 2026-11-06) showed
 that a site can install 0.3.5 and still run the committed **0.3.4** workflow
 snapshot. The resulting failure was indistinguishable from an API-key problem.
 

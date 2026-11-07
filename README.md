@@ -466,7 +466,7 @@ By default commits are now attributed to whoever triggered the run
 (`github.actor` + the push author's email). To pin your own account:
 
 ```bash
-pnpm exec astro-sveltia-pages init:i18n --commit-author "liangningcn <liangningcn@users.noreply.github.com>"
+pnpm exec astro-sveltia-pages init:i18n --commit-author "Your Name <you@users.noreply.github.com>"
 ```
 
 You can also edit `env.COMMIT_AUTHOR_NAME` / `COMMIT_AUTHOR_EMAIL` in the generated
