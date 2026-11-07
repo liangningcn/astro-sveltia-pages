@@ -10,6 +10,18 @@ section below.
 
 ---
 
+## 0.4.6
+
+### Changed
+
+- **Privacy hardening (no functional change).** Removed every reference to private
+  consumer repositories and personal identities from the README, CHANGELOG, source
+  comments, tests, the generated workflow template and the published Release notes.
+  Commit-author examples now use the generic placeholder
+  `Your Name <you@users.noreply.github.com>`. A build-time privacy scan in
+  `scripts/build-templates.mjs` now rejects any future leak of a private project
+  name or personal email before the package is published.
+
 ## 0.4.5
 
 ### Added

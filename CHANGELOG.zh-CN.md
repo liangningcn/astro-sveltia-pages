@@ -8,6 +8,15 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.4.6
+
+### 变更
+
+- **脱敏（无功能变动）。** 从 README、更新日志、源码注释、测试、生成的工作流模板以及
+  已发布的 Release 说明中，移除所有对私有消费方仓库与个人身份的引用；提交署名示例改为
+  通用占位符（`Your Name <you@users.noreply.github.com>`）。`scripts/build-templates.mjs`
+  新增构建期隐私扫描，任何私有项目名/个人邮箱在发布前都会被直接拦截。
+
 ## 0.4.5
 
 ### 新增
