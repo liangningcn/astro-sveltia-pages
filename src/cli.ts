@@ -4,12 +4,23 @@ import {
     existsSync,
     mkdirSync,
     readFileSync,
+    readdirSync,
     realpathSync,
     writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+    computeTargetLangs,
+    describeParseError,
+    diffLocales,
+    extractInlineSveltiaBlock,
+    localeKey,
+    parseI18nConfig,
+    parseLocaleList,
+    stripConfigComments,
+} from "./i18n-config.js";
 import {
     I18N_CHECK_COMMAND,
     I18N_POSTINSTALL_COMMAND,
@@ -310,189 +321,92 @@ function resolveI18nTemplatePath(name: string): string {
     return resolveTemplatePath(join("templates", "i18n", name));
 }
 
-function extractDefaultLocale(text: string): string {
-    // Sveltia configs exist both as JS/TS object literals (quoted) and as YAML
-    // (`default_locale: en`, unquoted). Accept both.
-    const match = text.match(/default_locale:\s*['"]?([\w-]+)['"]?/);
-    return match ? match[1] : "";
-}
+const CONTENT_FILE = /\.(?:md|mdx|markdown)$/i;
+const LANGUAGE_DIR = /^[A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?$/;
+
+type DiskDetection = {
+    languages: string[];
+    rootExists: boolean;
+    collectionCount: number;
+};
 
 /**
- * Removes JS line/block comments and YAML `#` comments while keeping string
- * literals intact. Config headers often mention `locale: 'zh'` in prose; a
- * whole-file scan used to treat those words as real configuration.
+ * Probes actual language folders under one content root. Empty folders,
+ * `.gitkeep`-only folders, dot-directories and non-language directory names
+ * are ignored so a scaffold never becomes a phantom target language.
  */
-function stripConfigComments(text: string): string {
-    let out = "";
-    let quote = "";
+function detectContentLanguages(cwd: string, contentRoot: string): DiskDetection {
+    const root = resolve(cwd, contentRoot);
 
-    for (let i = 0; i < text.length; i += 1) {
-        const char = text[i];
-        const next = text[i + 1] ?? "";
-
-        if (quote) {
-            out += char;
-
-            if (char === "\\") {
-                out += next;
-                i += 1;
-            } else if (char === quote) {
-                quote = "";
-            }
-
-            continue;
-        }
-
-        if (char === "'" || char === '"' || char === "`") {
-            quote = char;
-            out += char;
-            continue;
-        }
-
-        // YAML line comment. A `#` inside a quoted string is protected above;
-        // requiring whitespace/line-start before it keeps URL fragments alone.
-        if (
-            char === "#" &&
-            (out.length === 0 || /[\s]/.test(out[out.length - 1] ?? ""))
-        ) {
-            while (i < text.length && text[i] !== "\n") {
-                i += 1;
-            }
-            out += "\n";
-            continue;
-        }
-
-        if (char === "/" && next === "/") {
-            while (i < text.length && text[i] !== "\n") {
-                i += 1;
-            }
-            out += "\n";
-            continue;
-        }
-
-        if (char === "/" && next === "*") {
-            i += 2;
-
-            while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) {
-                i += 1;
-            }
-
-            i += 1;
-            out += " ";
-            continue;
-        }
-
-        out += char;
+    if (!existsSync(root)) {
+        return { languages: [], rootExists: false, collectionCount: 0 };
     }
 
-    return out;
-}
+    const collections = readdirSync(root, { withFileTypes: true }).filter(
+        (entry) => entry.isDirectory() && !entry.name.startsWith("."),
+    );
+    const found = new Set<string>();
 
-/**
- * Returns the contents of the first `locales: [...]` list. The scan is
- * bracket-balanced so object-form lists and nested arrays both work, and the
- * negative lookbehind keeps collection-level `initial_locales` out.
- */
-function extractLocalesBlock(text: string): string | null {
-    const match = /(?<![\w])locales\s*:\s*\[/.exec(text);
+    for (const collection of collections) {
+        const collectionDir = join(root, collection.name);
 
-    if (!match) {
-        return null;
-    }
+        for (const entry of readdirSync(collectionDir, { withFileTypes: true })) {
+            if (!entry.isDirectory()) {
+                // `single_file` / `multiple_files` keep the locale in
+                // frontmatter instead of a <lang>/ folder. Only the leading
+                // frontmatter block is read, so prose cannot leak in.
+                if (!entry.isFile() || !CONTENT_FILE.test(entry.name)) {
+                    continue;
+                }
 
-    const start = match.index + match[0].length - 1;
-    let depth = 0;
-    let quote = "";
+                const head = readFileSync(
+                    join(collectionDir, entry.name),
+                    "utf-8",
+                ).slice(0, 2048);
+                const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(head)?.[1];
 
-    for (let i = start; i < text.length; i += 1) {
-        const char = text[i];
+                if (!frontmatter) {
+                    continue;
+                }
 
-        if (quote) {
-            if (char === "\\") {
-                i += 1;
+                const locale =
+                    /^locale:\s*['"]?([A-Za-z]{2,3}(?:-[A-Za-z]{2,4})?)['"]?\s*$/m.exec(
+                        frontmatter,
+                    )?.[1];
+
+                if (locale) {
+                    found.add(locale);
+                }
+
                 continue;
             }
 
-            if (char === quote) {
-                quote = "";
+            if (entry.name.startsWith(".") || !LANGUAGE_DIR.test(entry.name)) {
+                continue;
             }
 
-            continue;
-        }
+            const hasContent = readdirSync(join(collectionDir, entry.name), {
+                withFileTypes: true,
+            }).some(
+                (file) =>
+                    file.isFile() &&
+                    !file.name.startsWith(".") &&
+                    CONTENT_FILE.test(file.name),
+            );
 
-        if (char === "'" || char === '"' || char === "`") {
-            quote = char;
-            continue;
-        }
-
-        if (char === "[") {
-            depth += 1;
-        } else if (char === "]") {
-            depth -= 1;
-
-            if (depth === 0) {
-                return text.slice(start + 1, i);
+            if (hasContent) {
+                found.add(entry.name);
             }
         }
     }
 
-    return null;
-}
-
-function extractLocales(text: string): string[] {
-    // Only look INSIDE the `locales:` list. A top-level `locale: 'zh'` is
-    // Sveltia's CMS UI language, not a content locale. 0.4.4 scanned the whole
-    // file for /locale:/ and returned early on that single match, which made
-    // array-form configs resolve to TARGET_LANGS=zh (reported by a consumer).
-    // Keep this in sync with the inline validator in i18n-translate.yml.
-    const block = extractLocalesBlock(text);
-
-    if (block === null) {
-        return [];
-    }
-
-    // Object form: locales: [{ locale: 'en', label: 'English' }, ...].
-    // YAML object lists may leave the value unquoted (`locale: en`).
-    const objectKeys = [
-        ...block.matchAll(/(?<![\w])locale\s*:\s*['"]?([\w-]+)['"]?/g),
-    ].map((match) => match[1]);
-
-    if (objectKeys.length > 0) {
-        return [...new Set(objectKeys)];
-    }
-
-    // Bare array form: ['en', 'fr']. When the block contains objects but no
-    // `locale:` key, refuse to guess from labels such as 'English'.
-    if (block.includes("{")) {
-        return [];
-    }
-
-    const quoted = [
-        ...new Set([...block.matchAll(/['"]([\w-]+)['"]/g)].map((match) => match[1])),
-    ];
-
-    if (quoted.length > 0) {
-        return quoted;
-    }
-
-    // YAML bare array: `locales: [en, es, fr, de]` (classic config.yml).
-    // Only language-shaped tokens survive, so comments and stray words cannot
-    // leak into TARGET_LANGS.
-    return [
-        ...new Set(
-            block
-                .split(/[^A-Za-z0-9_-]+/)
-                .filter((token) => /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/i.test(token)),
+    return {
+        languages: [...found].sort((a, b) =>
+            a.toLowerCase().localeCompare(b.toLowerCase()),
         ),
-    ];
-}
-
-function extractStructure(text: string): string {
-    // YAML configs write `structure: multiple_folders` without quotes.
-    const match = text.match(
-        /structure:\s*['"]?(multiple_folders|single_file|multiple_files)['"]?/,
-    );
-    return match ? match[1] : "multiple_folders";
+        rootExists: true,
+        collectionCount: collections.length,
+    };
 }
 
 function deriveProjectName(cwd: string): string {
@@ -539,19 +453,19 @@ const I18N_CONFIG_CANDIDATES = [
     "astro.config.ts",
 ];
 
-/** True when a file holds an inline Sveltia CMS config with a locales list. */
-function hasInlineCmsConfig(path: string): boolean {
-    try {
-        const text = stripConfigComments(readFileSync(path, "utf-8"));
-
-        return /\bsveltia\s*\(/.test(text) && extractLocales(text).length > 0;
-    } catch {
-        return false;
-    }
+function isAstroConfigName(name: string): boolean {
+    return basename(name).includes("astro.config.");
 }
 
+/**
+ * Resolves the CMS config. An `astro.config.*` fallback is only adopted when
+ * the inline `sveltia({...})` options can be parsed statically; a config that
+ * exists but cannot be parsed gets its own actionable error instead of the
+ * generic "not found" message.
+ */
 function readI18nConfigPath(cwd: string, configArg: string | undefined): string {
     const candidates = configArg ? [configArg] : I18N_CONFIG_CANDIDATES;
+    const failures: { candidate: string; message: string }[] = [];
 
     for (const candidate of candidates) {
         const path = join(cwd, candidate);
@@ -560,17 +474,43 @@ function readI18nConfigPath(cwd: string, configArg: string | undefined): string 
             continue;
         }
 
-        // An explicit --config and the dedicated CMS config names are trusted
-        // as-is; only an Astro config needs a content check before use.
-        if (
-            !configArg &&
-            candidate.includes("astro.config.") &&
-            !hasInlineCmsConfig(path)
-        ) {
-            continue;
+        if (!configArg && isAstroConfigName(candidate)) {
+            let text: string;
+
+            try {
+                text = readFileSync(path, "utf-8");
+            } catch {
+                continue;
+            }
+
+            const inline = extractInlineSveltiaBlock(stripConfigComments(text));
+
+            // A plain Astro config with no integration is not a CMS config.
+            if (inline.status === "not-found") {
+                continue;
+            }
+
+            const result = parseI18nConfig(text, true);
+
+            if (!result.ok) {
+                failures.push({
+                    candidate,
+                    message: describeParseError(result, candidate),
+                });
+                continue;
+            }
         }
 
         return path;
+    }
+
+    if (failures.length > 0) {
+        const first = failures[0];
+
+        fail(
+            `找到 ${first.candidate}，但它含 sveltia() 集成却无法静态解析 i18n 配置。\n` +
+                `      ${first.message}`,
+        );
     }
 
     fail(
@@ -689,7 +629,8 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
     const force = args.includes("--force") || args.includes("--force=true");
     const configArg = readArgValue(args, "--config");
     const contentRoot = readArgValue(args, "--content-root") ?? "src/content";
-    const requestedDefaultLocale = readArgValue(args, "--default-locale") ?? "en";
+    const explicitDefaultLocale = readArgValue(args, "--default-locale")?.trim() ?? "";
+    const explicitLocales = parseLocaleList(readArgValue(args, "--locales") ?? "");
     const projectName = readArgValue(args, "--project-name") ?? deriveProjectName(cwd);
 
     const configPath = readI18nConfigPath(cwd, configArg);
@@ -698,37 +639,92 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
     // so always emit POSIX separators for paths written into the workflow.
     const configRelative =
         relative(cwd, configPath).replace(/\\/g, "/") || "sveltia-cms.config.mjs";
-    // Comments may mention `locale: 'xx'` in prose; strip them before parsing.
-    const configText = stripConfigComments(readFileSync(configPath, "utf-8"));
+    const parsed = parseI18nConfig(
+        readFileSync(configPath, "utf-8"),
+        isAstroConfigName(configPath),
+    );
 
-    const rawLocales = extractLocales(configText);
-
-    if (rawLocales.length === 0) {
-        fail(
-            "未能从 Sveltia 配置解析出 locales。\n" +
-                '      请确认配置包含 locales: [...] 或 locales: [{ locale: "en" }]。',
-        );
+    if (!parsed.ok) {
+        fail(describeParseError(parsed, configRelative));
     }
 
-    const defaultLocale = extractDefaultLocale(configText) || requestedDefaultLocale;
+    // Explicit CLI flags win over the config, per the documented priority.
+    const defaultLocale = explicitDefaultLocale || parsed.defaultLocale || "en";
 
     // Sveltia requires locales to include default_locale. If they don't, the
     // parser produced a wrong list (0.4.4 read the CMS UI `locale: 'zh'`),
     // so fail loudly instead of generating a bogus TARGET_LANGS.
-    if (!rawLocales.includes(defaultLocale)) {
+    const configDefault = parsed.defaultLocale || defaultLocale;
+
+    if (
+        !explicitLocales.length &&
+        !parsed.locales.some((lang) => localeKey(lang) === localeKey(configDefault))
+    ) {
         fail(
-            `解析到的语言列表 [${rawLocales.join(", ")}] 不包含 default_locale=${defaultLocale}。\n` +
+            `解析到的语言列表 [${parsed.locales.join(", ")}] 不包含 default_locale=${configDefault}。\n` +
                 "      请确认 i18n.locales 是数组或对象数组；CMS 界面语言 `locale: 'zh'` 不会被当作语言列表。",
         );
     }
 
-    const structure = extractStructure(configText);
-    const targetLangs = rawLocales.filter((lang) => lang !== defaultLocale).sort();
+    const disk = detectContentLanguages(cwd, contentRoot);
+    let source = "Sveltia 配置（i18n.locales）";
+
+    if (explicitLocales.length) {
+        source = "--locales 显式指定";
+    } else if (disk.languages.length) {
+        source = "Sveltia 配置 + 文件系统实测并集";
+    }
+
+    console.log(`${LOG_PREFIX} 语言来源：${source}；源语言 ${defaultLocale}`);
+    console.log(`${LOG_PREFIX} 配置声明：${parsed.locales.join(", ") || "(无)"}`);
+    console.log(
+        `${LOG_PREFIX} 文件系统实测：${disk.languages.join(", ") || "(无)"}` +
+            `（content-root ${contentRoot}，${disk.collectionCount} 个 collection）`,
+    );
+
+    if (!disk.rootExists) {
+        console.log(
+            `${LOG_PREFIX} ⚠️ content-root 不存在：${contentRoot}；` +
+                "请用 --content-root <path> 指向实际内容目录。",
+        );
+    }
+
+    const difference = diffLocales(parsed.locales, disk.languages, defaultLocale);
+
+    if (
+        disk.rootExists &&
+        difference.declaredMissing.length > 0 &&
+        !explicitLocales.length
+    ) {
+        console.log(
+            `${LOG_PREFIX} ⚠️ 配置声明但目录不存在：${difference.declaredMissing.join(", ")}`,
+        );
+    }
+
+    if (
+        disk.rootExists &&
+        difference.undeclared.length > 0 &&
+        !explicitLocales.length
+    ) {
+        console.log(
+            `${LOG_PREFIX} ⚠️ 目录存在但配置未声明：${difference.undeclared.join(", ")}` +
+                "（已并入 TARGET_LANGS，建议同步补进 i18n.locales）",
+        );
+    }
+
+    const targetLangs = computeTargetLangs({
+        configLocales: parsed.locales,
+        detectedLangs: disk.languages,
+        explicitLocales,
+        defaultLocale,
+    });
 
     if (targetLangs.length === 0) {
         fail(
-            `解析到 locales=${rawLocales.join(",")} 但 default_locale=${defaultLocale}，` +
-                "没有可翻译的目标语言。请在配置里添加除源语言外的其它语言。",
+            `没有可翻译的目标语言（源语言 ${defaultLocale}；配置=${parsed.locales.join(",") || "无"}；` +
+                `文件系统=${disk.languages.join(",") || "无"}）。\n` +
+                "      请在配置里添加其它语言、用 --locales <list> 显式指定，" +
+                "或用 --content-root <path> 指向实际内容目录。",
         );
     }
 
@@ -747,8 +743,11 @@ export function runInitI18n(args: string[], cwd: string = process.cwd()): void {
     const workflow = workflowTemplate
         .replace(/__CONTENT_ROOT__/g, yamlString(contentRoot))
         .replace(/__TARGET_LANGS__/g, yamlString(targetLangs.join(",")))
+        .replace(/__DETECTED_LANGS__/g, yamlString(disk.languages.join(",")))
+        .replace(/__LANGS_OVERRIDE__/g, yamlString(explicitLocales.join(",")))
+        .replace(/__DEFAULT_LOCALE__/g, yamlString(defaultLocale))
         .replace(/__CONFIG_FILE__/g, yamlString(configRelative))
-        .replace(/__I18N_STRUCTURE__/g, yamlString(structure))
+        .replace(/__I18N_STRUCTURE__/g, yamlString(parsed.structure))
         .replace(/__COMMIT_AUTHOR_NAME__/g, yamlString(author.name))
         .replace(/__COMMIT_AUTHOR_EMAIL__/g, yamlString(author.email));
 
@@ -928,14 +927,28 @@ ${LOG_PREFIX} i18n 自动翻译已初始化（模板 ${I18N_TEMPLATE_VERSION}，
     }
 }
 
+/** Reads the version from the package root (dist/cli.mjs -> ../package.json). */
+function readPackageVersion(): string {
+    try {
+        const path = fileURLToPath(new URL("../package.json", import.meta.url));
+        const pkg = JSON.parse(readFileSync(path, "utf-8")) as { version?: string };
+
+        return pkg.version ?? "unknown";
+    } catch {
+        return "unknown";
+    }
+}
+
 const CLI_USAGE = `
 ${LOG_PREFIX} Usage:
   astro-sveltia-pages init [--platform cloudflare|edgeone] [--site-url <url>]
   astro-sveltia-pages init:i18n [--config <path>] [--content-root <path>]
-                                [--default-locale <lang>] [--project-name <name>]
+                                [--default-locale <lang>] [--locales <list>]
+                                [--project-name <name>]
                                 [--commit-author "Name <email>"]
                                 [--force] [--check] [--no-backup] [--postinstall]
   astro-sveltia-pages --help
+  astro-sveltia-pages --version
 
 Commands:
   init        Copy the GitHub OAuth edge function and update .env.example.
@@ -944,6 +957,10 @@ Commands:
               glossary and remap script. Also available as \`init --i18n\`.
 
 Flags:
+  --help, -h      Print this usage and exit.
+  --version, -v   Print the package version and exit.
+  --locales       Comma-separated target locales for init:i18n; overrides both
+                  the Sveltia config and on-disk language detection.
   --postinstall   Hook mode for package.json postinstall: no-op when i18n is not
                   enabled, upgrade only stale snapshots, no .bak, never fails
                   the install, and prints a reminder to commit the change.
@@ -1037,6 +1054,11 @@ function failUnknownCommand(command: string): never {
 
 /** Dispatches one CLI invocation. Unknown commands/flags fail loudly (exit 1). */
 export function dispatchCli(args: string[], cwd: string = process.cwd()): void {
+    if (args.includes("--version") || args.includes("-v")) {
+        console.log(readPackageVersion());
+        return;
+    }
+
     if (args.includes("--help") || args.includes("-h")) {
         console.log(CLI_USAGE);
         return;

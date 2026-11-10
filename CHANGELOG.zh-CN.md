@@ -8,6 +8,32 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.4.7
+
+### 新增
+
+- **`init:i18n` 回退解析 `astro.config.{mjs,js,mts,ts}` 里内联的 `sveltia({...})`（方案 C）。** CMS 配置只在构建期产出的仓库不再报「未找到配置」。支持重命名过的默认导入；解析范围限定在集成的 options 对象内，避免把 sitemap 等其它集成的 `locales` 数组误当成 CMS 语言。无法静态解析的情形（变量参数 `sveltia(options)`、展开运算符、非字面量 `locales`）一律明确报错并提示用 `--config <path>`，绝不猜测。独立的 CMS 配置文件仍优先于 astro.config。
+- **实际语言探测。** `TARGET_LANGS` 按明确优先级确定并在日志里说明来源：`--locales` 优先；否则取 `i18n.locales` 与 `<content-root>/<collection>/<lang>/` 下实测语言的**并集**（非 `multiple_folders` 结构还会读 frontmatter 的 `locale`）。空目录、只有 `.gitkeep` 的目录、隐藏目录一律忽略；`zh-CN` 与 `zh` 保持独立；大小写按小写 key 比较。「配置声明但目录不存在」「目录存在但配置未声明」两类差异都会逐条输出。除源语言外一个语言都拿不到时明确报错并给出修复建议，不生成翻译零语言的工作流。`--content-root` 现在同时驱动探测与工作流占位符。
+- **CLI 与 CI 校验器共用同一份解析层。** `src/i18n-config.ts` 是唯一事实来源，`scripts/build-templates.mjs` 把它编译为无依赖 JS 并注入工作流 `Validate TARGET_LANGS` 步骤的两个生成标记之间；原先需要人工同步的两份手写实现已删除，`pnpm check:templates` 会在漂移时失败。工作流新增 `DETECTED_LANGS` / `LANGS_OVERRIDE` / `DEFAULT_LOCALE` 快照，校验器据此重算并集再与 `TARGET_LANGS` 比对。
+- **`--version` / `-v`** 打印包版本号并 exit 0。
+
+### 修复
+
+- `--version` 此前被当成未知 flag（exit 1）。未知 flag 仍然是「报错 + usage + exit 1 + 零文件写入」，仅新增两个版本 flag。
+- CI 校验器此前在配置解析失败时**静默跳过**（exit 0），现在与 CLI 报同一段错误文本，包括「astro.config.mjs 含 `sveltia(options)` 但读不到 locales」的场景。
+- `--default-locale` 此前只要配置里声明了 `default_locale` 就会被覆盖，现改为显式 CLI 优先。
+- 「配置文件不存在」与「文件存在但无法静态解析」现在是两条不同的错误，各自给出修复建议。
+- 修正中英 README 中「只有 `i18n.locales` 生成 `TARGET_LANGS`」的过时说明。
+
+### 迁移
+
+- i18n 模板版本升至 **0.4.7**。升级依赖后**必须在每个站点仓库重跑 `pnpm exec astro-sveltia-pages init:i18n`** 并提交三份重新生成的快照；CLI 会自动升级旧文件并保留 `*.bak`，CI 可用 `init:i18n --check` 拦截过期模板。不重跑会导致工作流的 `TEMPLATE_VERSION` 与已安装版本不一致，detect 阶段提前终止。
+- 已使用 `sveltia-cms.config.mjs` / `sveltia.config.mjs` / `public/admin/config.yml` 的仓库，配置发现行为不变。`TARGET_LANGS` 现在可能额外并入「目录存在但配置未声明」的语言，日志会列出，便于补进 `i18n.locales`（或用 `--locales` 强制指定精确列表）。
+
+### 依赖审计
+
+- `pnpm audit --registry=https://registry.npmjs.org` 对全 workspace 报 31 条（3 critical / 16 high / 11 moderate / 1 low）。发布 tarball 只含 `dist/`，运行时依赖仅 3 个（`@sveltia/cms`、`js-yaml`、`zod-to-ts`）。3 个 critical 全在 dev 链（`@vitest/browser`、`tinypool`）；`sharp` / `nanoid` / `postcss` / `undici` / `pnpm` 都来自 workspace 内 `example/` 示例应用的 Astro/Vite 链，**不进入发布物**。真正进入运行时依赖传播链且命中 high 的有 2 个：`zod@4.6.5`（`zod-to-ts` 的 peer，4.6.6 修复）与 `source-map-js@1.2.1`（`@sveltia/cms → svgo → csso → css-tree`，1.2.2 修复）；二者都不在本包运行时代码路径上（CMS 仅浏览器端、`zod-to-ts` 仅构建期），升级需等上游或配 `pnpm overrides`。0.4.7 **未捆绑依赖升级**。
+
 ## 0.4.6
 
 ### 变更

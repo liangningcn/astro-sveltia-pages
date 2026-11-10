@@ -384,9 +384,12 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             ```
 
             It auto-detects `sveltia-cms.config.mjs` / `sveltia.config.mjs`,
-            and since 0.4.5 also classic YAML configs such as
-            `public/admin/config.yml` (unquoted `locales: [en, fr]` works too;
-            override with `--config <path>`), reads
+            classic YAML configs such as `public/admin/config.yml` (unquoted
+            `locales: [en, fr]` works too), and since 0.4.7 an inline
+            `sveltia({...})` in `astro.config.{mjs,js,mts,ts}` — including renamed
+            default imports. A variable argument such as `sveltia(options)` cannot
+            be resolved statically: the command fails with a hint to use
+            `--config <path>` instead of guessing. It reads
             `i18n.default_locale`, `i18n.locales` and `i18n.structure`, fills the
             template placeholders, and writes three files. Since 0.4.0 it **no longer
             parses collections** — each Markdown file decides for itself:
@@ -395,13 +398,24 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             - `i18n/glossary.md`
             - `scripts/remap-translations.sh`
 
-            Only `i18n.locales` feeds `TARGET_LANGS`. A top-level `locale` (the CMS
-            UI language, e.g. `locale: 'zh'`) and `default_locale` are not locales.
+            `TARGET_LANGS` is resolved in this order, and the run logs which source
+            won: explicit `--locales` first, otherwise `i18n.locales` **merged with**
+            the languages actually found under
+            `<content-root>/<collection>/<lang>/` (or frontmatter `locale` for
+            non-`multiple_folders` structures). Empty folders, `.gitkeep`-only
+            folders and dot-directories are ignored; region variants such as
+            `zh-CN` stay distinct from `zh`; both kinds of config/disk mismatch are
+            logged. A top-level `locale` (the CMS UI language, e.g. `locale: 'zh'`)
+            and `default_locale` are never target languages. If nothing beyond the
+            source locale can be found, the command fails with fix hints rather
+            than writing a workflow that translates zero languages.
 
             Useful flags:
 
-            - `--content-root <path>` — content root (default `src/content`)
-            - `--default-locale <lang>` — source locale (default `en`)
+            - `--locales <list>` — comma-separated target locales; overrides both
+              the config and on-disk detection
+            - `--content-root <path>` — content root for detection (default `src/content`)
+            - `--default-locale <lang>` — source locale (default `en`, wins over the config)
             - `--project-name <name>` — used in the glossary heading
             - `--commit-author "Name <email>"` — fix the author of translated commits
             - `--force` — overwrite files that already exist
@@ -414,8 +428,10 @@ Once the CMS edits only the English source (see the Sveltia settings below), you
             `⬆ 已升级 …`) line per file, then the
             `i18n 自动翻译已初始化（模板 …，源语言 … → …）` summary and a setup
             checklist. `--check` prints `✅ i18n 模板均为最新版本 …` (exit 0) or a
-            `STALE i18n TEMPLATES` notice (exit 1). Unknown subcommands now print
-            `Unknown command: <name>` and exit 1; `--help` lists both commands.
+            `STALE i18n TEMPLATES` notice (exit 1). Unknown subcommands and unknown
+            flags print `Unknown command: <name>` plus usage and exit 1 (they no
+            longer have side effects); `--help` lists both commands and
+            `--version` / `-v` prints the package version.
             If a command produces **no output at all**, the CLI never ran. This
             affected 0.3.6 and earlier under pnpm; upgrade to 0.3.7+, or use
             `node node_modules/astro-sveltia-pages/dist/cli.mjs init:i18n` as a

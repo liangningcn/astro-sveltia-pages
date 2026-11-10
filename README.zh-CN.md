@@ -378,23 +378,34 @@ export const collections = {
         pnpm exec astro-sveltia-pages init:i18n
         ```
 
-        它会自动探测 `sveltia-cms.config.mjs` / `sveltia.config.mjs`，
-        0.4.5 起也支持经典 YAML 配置 `public/admin/config.yml`
-        （无引号的 `locales: [en, fr]` 同样能解析；可用 `--config <path>` 覆盖），读取
-        `i18n.default_locale`、`i18n.locales` 与 `i18n.structure`，填充模板占位符，
-        并写出三份文件（0.4.0 起**不再解析集合**，是否翻译由每篇 md 的 frontmatter 决定）：
+        它会自动探测 `sveltia-cms.config.mjs` / `sveltia.config.mjs`、经典 YAML
+        配置 `public/admin/config.yml`（无引号的 `locales: [en, fr]` 同样能解析），
+        0.4.7 起还会回退解析 `astro.config.{mjs,js,mts,ts}` 里内联的
+        `sveltia({...})`（含重命名过的默认导入）。若参数是变量（如
+        `sveltia(options)`）则无法静态解析，命令会明确报错并提示改用
+        `--config <path>`，绝不猜测。随后读取 `i18n.default_locale`、
+        `i18n.locales` 与 `i18n.structure`，填充模板占位符，并写出三份文件
+        （0.4.0 起**不再解析集合**，是否翻译由每篇 md 的 frontmatter 决定）：
 
         - `.github/workflows/i18n-translate.yml`
         - `i18n/glossary.md`
         - `scripts/remap-translations.sh`
 
-        只有 `i18n.locales` 会用来生成 `TARGET_LANGS`；顶层 `locale`（CMS 界面语言，
-        例如 `locale: 'zh'`）与 `default_locale` 都不会被当作语言列表。
+        `TARGET_LANGS` 按以下优先级确定，并在日志里说明最终来源：显式
+        `--locales` 优先；否则取 `i18n.locales` 与文件系统实测语言的**并集**——
+        实测来自 `<content-root>/<collection>/<lang>/` 下真实含 md 的语言目录
+        （非 `multiple_folders` 结构还会读 frontmatter 的 `locale` 字段）。空目录、
+        只有 `.gitkeep` 的目录、隐藏目录一律忽略；`zh-CN` 与 `zh` 视为不同语言；
+        「配置声明但目录不存在」「目录存在但配置未声明」两类差异都会逐条列出。
+        顶层 `locale`（CMS 界面语言，例如 `locale: 'zh'`）与 `default_locale`
+        都不会被当作目标语言。若除源语言外一个语言都拿不到，命令会报错并给出
+        修复建议，而不是生成一份翻译零语言的工作流。
 
         可用参数：
 
-        - `--content-root <path>` — 内容根目录（默认 `src/content`）
-        - `--default-locale <lang>` — 源语言（默认 `en`）
+        - `--locales <list>` — 逗号分隔的目标语言；覆盖配置与文件系统探测
+        - `--content-root <path>` — 语言探测的内容根目录（默认 `src/content`）
+        - `--default-locale <lang>` — 源语言（默认 `en`，优先于配置）
         - `--project-name <name>` — 用于术语表标题
         - `--commit-author "Name <email>"` — 固定译文 commit 的署名（见下文）
         - `--force` — 覆盖已存在的文件
@@ -406,8 +417,9 @@ export const collections = {
         成功执行时**绝不会没有输出**：每份文件会打印一行 `已写入 …`（或
         `⬆ 已升级 …`），随后输出 `i18n 自动翻译已初始化（模板 …，源语言 … → …）`
         摘要与后续配置清单。`--check` 会打印 `✅ i18n 模板均为最新版本 …`（退出码 0）
-        或 `STALE i18n TEMPLATES` 提示（退出码 1）。未知子命令会输出
-        `Unknown command: <name>` 并以退出码 1 结束；`--help` 列出全部命令。
+        或 `STALE i18n TEMPLATES` 提示（退出码 1）。未知子命令与未知 flag 会输出
+        `Unknown command: <name>` 加 usage，并以退出码 1 结束（不再产生副作用）；
+        `--help` 列出全部命令，`--version` / `-v` 打印包版本号。
         如果命令**完全没有输出**，说明 CLI 根本没有执行。0.3.6 及更早版本在 pnpm
         下会触发此问题，请升级到 0.3.7+；临时可改用
         `node node_modules/astro-sveltia-pages/dist/cli.mjs init:i18n`。

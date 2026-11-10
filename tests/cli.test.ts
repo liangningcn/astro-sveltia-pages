@@ -20,10 +20,19 @@ import { dispatchCli, runInit } from "../src/cli.ts";
 const TEMPLATE_PATH = fileURLToPath(new URL("../templates/auth.js", import.meta.url));
 const DIST_DIR = fileURLToPath(new URL("../dist", import.meta.url));
 const BUILT_CLI = join(DIST_DIR, "cli.mjs");
+const PACKAGE_VERSION = (
+    JSON.parse(
+        readFileSync(
+            fileURLToPath(new URL("../package.json", import.meta.url)),
+            "utf-8",
+        ),
+    ) as { version: string }
+).version;
 // The symlink group spawns dist/cli.mjs. A stale build must not be tested as
 // if it were current code (that produced 3 confusing failures before).
 const CLI_SOURCES = [
     "../src/cli.ts",
+    "../src/i18n-config.ts",
     "../src/i18n-template-check.ts",
     "../src/options.ts",
 ].map((relativePath) => fileURLToPath(new URL(relativePath, import.meta.url)));
@@ -333,6 +342,23 @@ describe("init — EdgeOne Pages", () => {
 });
 
 describe("CLI command dispatch", () => {
+    it("prints the package version for --version / -v without side effects", () => {
+        for (const flag of ["--version", "-v"]) {
+            const cwd = makeTempDir();
+            const console_ = captureConsole();
+
+            try {
+                dispatchCli([flag], cwd);
+
+                expect(console_.log.join("\n").trim()).toBe(PACKAGE_VERSION);
+                expect(existsSync(join(cwd, "functions", "auth.js"))).toBe(false);
+                expect(existsSync(join(cwd, ".env.example"))).toBe(false);
+            } finally {
+                console_.restore();
+            }
+        }
+    });
+
     it("prints usage listing init:i18n for --help", () => {
         const console_ = captureConsole();
 
@@ -416,10 +442,25 @@ describe("CLI entry detection via a pnpm-style symlink", () => {
         expect(result.stderr).toContain("Unknown command: definitely-not-a-command");
     });
 
+    runIt("prints the built package version for --version and -v", () => {
+        const cwd = makeTempDir();
+
+        for (const flag of ["--version", "-v"]) {
+            const result = spawnSync(process.execPath, [BUILT_CLI, flag], {
+                cwd,
+                encoding: "utf-8",
+            });
+
+            expect(result.status).toBe(0);
+            expect(result.stdout.trim()).toBe(PACKAGE_VERSION);
+            expect(existsSync(join(cwd, "functions", "auth.js"))).toBe(false);
+        }
+    });
+
     runIt("rejects unknown flags instead of running init with side effects", () => {
         const cwd = makeTempDir();
 
-        for (const flag of ["--version", "--hel", "--platform", "--site-url"]) {
+        for (const flag of ["--hel", "--versoin", "--platform", "--site-url"]) {
             const result = spawnSync(process.execPath, [BUILT_CLI, flag], {
                 cwd,
                 encoding: "utf-8",

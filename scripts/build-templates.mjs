@@ -14,6 +14,7 @@ import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
 import { build } from "vite";
 import { format } from "vite-plus/fmt";
 
@@ -31,6 +32,12 @@ const TARGETS = [
 // i18n templates shipped as-is (placeholders filled by the init:i18n CLI).
 const I18N_TEMPLATE_DIR = "templates/i18n";
 const I18N_DIST_DIR = "dist/templates/i18n";
+// The CI validator inside the workflow runs the SAME parser as src/cli.ts.
+// This file is compiled to dependency-free JS and injected between two markers.
+const I18N_PARSER_SOURCE = "src/i18n-config.ts";
+const I18N_WORKFLOW = "templates/i18n/i18n-translate.yml";
+const PARSER_BEGIN = "// BEGIN GENERATED I18N PARSER";
+const PARSER_END = "// END GENERATED I18N PARSER";
 
 // Mirrors the formatter profile in vite.config.ts.
 const FORMAT_OPTIONS = {
@@ -93,6 +100,53 @@ async function buildAuthTemplates() {
 }
 
 /**
+ * Compiles `src/i18n-config.ts` to dependency-free JS and injects it into the
+ * CI validator. The CLI and the workflow therefore share one parser, which
+ * removes the "keep these two implementations in sync" drift class entirely.
+ */
+async function injectI18nParser() {
+    const source = await readFile(join(root, I18N_PARSER_SOURCE), "utf-8");
+    const { outputText } = ts.transpileModule(source, {
+        compilerOptions: {
+            target: ts.ScriptTarget.ES2022,
+            module: ts.ModuleKind.ESNext,
+        },
+        fileName: I18N_PARSER_SOURCE,
+    });
+    const bare = outputText.replace(/^export\s*\{[\s\S]*?\};?\s*$/m, "").trim();
+
+    if (!bare.includes("function parseI18nConfig")) {
+        throw new Error("Shared i18n parser was not compiled correctly.");
+    }
+
+    const workflowPath = join(root, I18N_WORKFLOW);
+    const lines = (await readFile(workflowPath, "utf-8")).split("\n");
+    const beginIndex = lines.findIndex((line) => line.includes(PARSER_BEGIN));
+    const endIndex = lines.findIndex((line) => line.includes(PARSER_END));
+
+    if (beginIndex < 0 || endIndex <= beginIndex) {
+        throw new Error(`${I18N_WORKFLOW} is missing the generated-parser markers.`);
+    }
+
+    const indent = lines[beginIndex].match(/^\s*/)?.[0] ?? "";
+    const injected = bare
+        .split("\n")
+        .map((line) => (line ? indent + line : ""))
+        .join("\n");
+    const next = [
+        ...lines.slice(0, beginIndex + 1),
+        injected,
+        ...lines.slice(endIndex),
+    ].join("\n");
+
+    await writeFile(workflowPath, next, "utf-8");
+
+    console.log(
+        `[astro-sveltia-pages] Injected shared i18n parser into ${I18N_WORKFLOW}.`,
+    );
+}
+
+/**
  * Copies the i18n workflow templates into the published `dist/templates/i18n`
  * directory and guards against accidental removal of required placeholders.
  */
@@ -144,6 +198,9 @@ async function buildI18nTemplates() {
             "ALLOW_PARTIAL_TRANSLATIONS",
             "__TARGET_LANGS__",
             "__CONFIG_FILE__",
+            "__DETECTED_LANGS__",
+            "__LANGS_OVERRIDE__",
+            "__DEFAULT_LOCALE__",
         ],
         "glossary.md": ["__TEMPLATE_VERSION__", "__PROJECT_NAME__"],
         "remap-translations.sh": ["__TEMPLATE_VERSION__"],
@@ -229,13 +286,14 @@ async function buildI18nTemplates() {
             "tr '[:upper:]' '[:lower:]'",
             "pelikhan lowercases {{lang}} in output filenames",
         ],
+        [PARSER_BEGIN, "CI validator carries the generated shared i18n parser"],
         [
-            "const localesBlock = s =>",
-            "CI validator parses only the locales: [...] block, not CMS UI locale",
+            "const result = parseI18nConfig(src, isAstro);",
+            "CI validator uses the same parser as the CLI",
         ],
         [
-            "if (!locs.includes(dl[1]))",
-            "CI validator rejects a locale list missing default_locale",
+            "if (!result.ok)",
+            "CI validator fails instead of silently skipping an unparsable config",
         ],
         ["Verify i18n template version", "CI-side stale-template gate (0.3.6)"],
         [
@@ -263,8 +321,8 @@ async function buildI18nTemplates() {
             "commit author falls back to the workflow triggerer (0.4.5)",
         ],
         [
-            "YAML bare array: locales: [en, es, fr]",
-            "CI validator supports unquoted YAML locale lists (0.4.5)",
+            "YAML bare array",
+            "shared parser supports unquoted YAML locale lists (0.4.5)",
         ],
     ];
 
@@ -399,6 +457,7 @@ async function assertNoPrivateIdentifiers() {
 async function main() {
     await assertNoPrivateIdentifiers();
     await buildAuthTemplates();
+    await injectI18nParser();
     await buildI18nTemplates();
 }
 

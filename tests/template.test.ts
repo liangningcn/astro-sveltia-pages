@@ -371,25 +371,37 @@ describe("i18n workflow CMS UI locale parsing guards", () => {
         fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
         "utf-8",
     );
+    const shared = readFileSync(
+        fileURLToPath(new URL("../src/i18n-config.ts", import.meta.url)),
+        "utf-8",
+    );
 
-    it("keeps CLI and CI locale parsing on the same algorithm", () => {
-        expect(cli).toContain("function extractLocalesBlock");
-        expect(cli).toContain("function stripConfigComments");
-        expect(cli).toContain("block.matchAll(/(?<![\\w])locale");
-        expect(workflow).toContain("const localesBlock = s =>");
-        expect(workflow).toContain("const parseLocales = s =>");
-        expect(workflow).toContain("b.matchAll(/(?<![\\w])locale");
+    it("keeps CLI and CI locale parsing on one shared source", () => {
+        expect(cli).toContain('from "./i18n-config.js"');
+        expect(shared).toContain("function extractLocalesBlock");
+        expect(shared).toContain("function stripConfigComments");
+        expect(shared).toContain("block.matchAll(/(?<![\\w])locale");
+        // The workflow carries the very same compiled functions, injected at
+        // build time between two markers. Two hand-written copies are gone.
+        expect(workflow).toContain("// BEGIN GENERATED I18N PARSER");
+        expect(workflow).toContain("// END GENERATED I18N PARSER");
+        expect(workflow).toContain("function extractLocalesBlock");
+        expect(workflow).toContain("function parseI18nConfig");
+        expect(workflow).not.toContain("__I18N_CONFIG_PARSER__");
+        expect(workflow).not.toContain("const localesBlock = s =>");
     });
 
     it("never falls back to a whole-file /locale:/ scan", () => {
         // That scan treated the CMS UI `locale: 'zh'` as the language list.
         expect(workflow).not.toContain("(?:^|[{,\\s])locale:");
         expect(cli).not.toContain("(?:^|[{,\\s])locale:");
+        expect(shared).not.toContain("(?:^|[{,\\s])locale:");
     });
 
     it("fails loudly when locales omit default_locale", () => {
-        expect(workflow).toContain("if (!locs.includes(dl[1]))");
-        expect(cli).toContain("if (!rawLocales.includes(defaultLocale))");
+        expect(workflow).toContain("if (!result.ok)");
+        expect(cli).toContain("localeKey(lang) === localeKey(configDefault)");
+        expect(shared).toContain("function describeParseError");
     });
 
     it("auto-detects the shorter sveltia.config.mjs config name", () => {
@@ -430,10 +442,15 @@ describe("i18n workflow 0.4.5 regression guards", () => {
     });
 
     it("supports unquoted YAML CMS configs in both the CLI and CI validator", () => {
+        const shared = readFileSync(
+            fileURLToPath(new URL("../src/i18n-config.ts", import.meta.url)),
+            "utf-8",
+        );
+
         expect(cli).toContain('"public/admin/config.yml"');
-        expect(cli).toContain("YAML bare array");
-        expect(workflow).toContain("YAML bare array: locales: [en, es, fr]");
-        expect(workflow).toContain("c === '#'");
+        expect(shared).toContain("YAML bare array");
+        expect(workflow).toContain("YAML bare array");
+        expect(workflow).toContain('char === "#"');
     });
 
     it("ships a postinstall hook that never breaks install", () => {

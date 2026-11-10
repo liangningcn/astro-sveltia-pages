@@ -10,6 +10,32 @@ section below.
 
 ---
 
+## 0.4.7
+
+### Added
+
+- **`init:i18n` falls back to an inline `sveltia({...})` in `astro.config.{mjs,js,mts,ts}`** (plan C). Repositories whose CMS config is only produced at build time no longer get "config not found". Renamed default imports are detected from the package's import statement, and parsing is scoped to the integration's options object so an unrelated `locales` array (for example a sitemap integration) cannot be mistaken for CMS locales. Anything that cannot be resolved statically — a variable argument (`sveltia(options)`), a spread, or a non-literal `locales` — fails with an actionable `--config <path>` hint instead of guessing. A dedicated CMS config file still wins over the Astro config.
+- **Real language detection.** `TARGET_LANGS` now follows an explicit priority, logged on every run: `--locales` first, otherwise `i18n.locales` merged with languages actually present under `<content-root>/<collection>/<lang>/` (frontmatter `locale` is also read for non-`multiple_folders` structures). Empty / `.gitkeep`-only / dot-directories are ignored, region variants such as `zh-CN` stay distinct from `zh`, and casing is compared case-insensitively. Both mismatch directions (`declared but missing on disk`, `on disk but undeclared`) are logged. If nothing beyond the source locale can be found, the command fails with fix hints rather than writing a workflow that translates zero languages. `--content-root` now drives detection as well as the workflow placeholder.
+- **One shared parser for the CLI and the CI validator.** `src/i18n-config.ts` is the single source of truth; `scripts/build-templates.mjs` compiles it to dependency-free JS and injects it between generated markers in the workflow's `Validate TARGET_LANGS` step. The two hand-written copies that had to be kept in sync manually are gone; `pnpm check:templates` fails on drift. The workflow carries `DETECTED_LANGS`, `LANGS_OVERRIDE` and `DEFAULT_LOCALE` snapshots so the validator recomputes the same union and compares it with `TARGET_LANGS`.
+- **`--version` / `-v`** prints the package version and exits 0.
+
+### Fixed
+
+- `--version` was previously treated as an unknown flag (it exited 1). Unknown flags still exit 1 with usage and no file writes; only the two version flags are now accepted.
+- The CI validator used to **silently skip** (`exit 0`) when a config could not be parsed. It now fails with the same error text as the CLI, including for an `astro.config.mjs` that contains `sveltia(options)` but no statically readable locales.
+- `--default-locale` was ignored whenever the config declared its own `default_locale`; explicit CLI flags now win as documented.
+- "Config file not found" and "config file exists but cannot be parsed" are now two distinct errors with different fix hints.
+- Documentation that claimed only `i18n.locales` feeds `TARGET_LANGS` was updated in both READMEs.
+
+### Migration
+
+- The i18n template version moves to **0.4.7**. After upgrading the dependency, **re-run `pnpm exec astro-sveltia-pages init:i18n` in every site repository** and commit the three regenerated snapshots. The CLI auto-upgrades stale files and keeps `*.bak` copies; `init:i18n --check` gates stale snapshots in CI. Skipping this step makes the workflow's `TEMPLATE_VERSION` disagree with the installed package version and the detect job terminates early.
+- Existing repositories with `sveltia-cms.config.mjs`, `sveltia.config.mjs` or `public/admin/config.yml` are unaffected in how the config is found. `TARGET_LANGS` may now additionally include languages found on disk that the config did not declare — the run logs them so you can add them to `i18n.locales` (or pass `--locales` to force an exact list).
+
+### Dependency audit
+
+- `pnpm audit --registry=https://registry.npmjs.org` reports 31 advisories (3 critical / 16 high / 11 moderate / 1 low) for the whole workspace. The published tarball contains only `dist/` with three runtime dependencies (`@sveltia/cms`, `js-yaml`, `zod-to-ts`). All three critical advisories are dev-chain (`@vitest/browser`, `tinypool`); `sharp`, `nanoid`, `postcss`, `undici` and `pnpm` resolve to the workspace `example/` app's Astro/Vite chain and are not shipped. Two high advisories do enter the runtime dependency graph as transitive deps: `zod@4.6.5` (peer of `zod-to-ts`, fixed in 4.6.6) and `source-map-js@1.2.1` (via `@sveltia/cms → svgo → csso → css-tree`, fixed in 1.2.2). Neither is on this package's runtime code path — the CMS is browser-only and `zod-to-ts` is build-time only. Upgrading them requires upstream releases or `pnpm overrides`; no dependency upgrade was bundled into 0.4.7.
+
 ## 0.4.6
 
 ### Changed

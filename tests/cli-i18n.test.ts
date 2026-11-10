@@ -803,7 +803,16 @@ function validatorScript(): string {
         .replace(/\n\s*NODE\s*$/, "");
 }
 
-function runValidator(configText: string, targetLangs: string) {
+function runValidator(
+    configText: string,
+    targetLangs: string,
+    options: {
+        configPath?: string;
+        detectedLangs?: string;
+        override?: string;
+        defaultLocale?: string;
+    } = {},
+) {
     const logs: string[] = [];
     const errors: string[] = [];
     let code = 0;
@@ -818,7 +827,13 @@ function runValidator(configText: string, targetLangs: string) {
                 throw new Error(`unexpected require: ${name}`);
             },
             process: {
-                env: { CONFIG_FILE: "sveltia.config.mjs", TARGET_LANGS: targetLangs },
+                env: {
+                    CONFIG_FILE: options.configPath ?? "sveltia.config.mjs",
+                    TARGET_LANGS: targetLangs,
+                    DETECTED_LANGS: options.detectedLangs ?? "",
+                    LANGS_OVERRIDE: options.override ?? "",
+                    DEFAULT_LOCALE: options.defaultLocale ?? "",
+                },
                 exit: (value: number) => {
                     code = value;
                     throw new Error(`VM_EXIT_${String(value)}`);
@@ -1189,5 +1204,349 @@ describe("init:i18n — postinstall hook (0.4.5)", () => {
             console_.restore();
             exitSpy.mockRestore();
         }
+    });
+});
+
+// 0.4.7: one shared parser for CLI + CI, astro.config fallback, and real
+// language detection from the content tree.
+function captureRun(args: string[], cwd: string): { log: string[]; error: string[] } {
+    const console_ = captureConsole();
+
+    try {
+        runInitI18n(args, cwd);
+        return { log: [...console_.log], error: [...console_.error] };
+    } finally {
+        console_.restore();
+    }
+}
+
+function captureFailure(args: string[], cwd: string): string[] {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code: number) => {
+        throw new Error(`process.exit(${String(code)})`);
+    }) as never);
+    const console_ = captureConsole();
+
+    try {
+        expect(() => runInitI18n(args, cwd)).toThrow(/process\.exit\(1\)/);
+        return [...console_.error];
+    } finally {
+        console_.restore();
+        exitSpy.mockRestore();
+    }
+}
+
+function writeContentTree(
+    cwd: string,
+    layout: Record<string, Record<string, string[]>>,
+    root = "src/content",
+): void {
+    for (const [collection, langs] of Object.entries(layout)) {
+        for (const [lang, files] of Object.entries(langs)) {
+            const dir = join(cwd, root, collection, lang);
+            mkdirSync(dir, { recursive: true });
+
+            for (const file of files) {
+                writeFileSync(join(dir, file), "---\ntitle: fixture\n---\nbody\n");
+            }
+        }
+    }
+}
+
+function workflowEnv(cwd: string): Record<string, string> {
+    const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+    return doc.env;
+}
+
+function minimalConfig(
+    locales: string,
+    structure = "multiple_folders",
+    defaultLocale = "en",
+): string {
+    return (
+        `export default { i18n: { structure: '${structure}', ` +
+        `default_locale: '${defaultLocale}', locales: [${locales}] } };\n`
+    );
+}
+
+const ASTRO_VARIABLE_CONFIG = `import { defineConfig } from "astro/config";
+import sveltia from "astro-sveltia-pages";
+import { options } from "./cms-options.mjs";
+
+export default defineConfig({ integrations: [sveltia(options)] });
+`;
+
+const ASTRO_DYNAMIC_LOCALES = `import { defineConfig } from "astro/config";
+import sveltia from "astro-sveltia-pages";
+
+export default defineConfig({
+  integrations: [sveltia({ i18n: { default_locale: "en", locales: LANGS } })],
+});
+`;
+
+const ASTRO_ALIAS_CONFIG = `import { defineConfig } from "astro/config";
+import cms from "astro-sveltia-pages";
+
+export default defineConfig({
+  integrations: [
+    sitemap({ i18n: { locales: ["xx", "yy"] } }),
+    cms({
+      i18n: {
+        structure: "multiple_folders",
+        default_locale: "en",
+        locales: ["en", "fr", "de"],
+      },
+    }),
+  ],
+});
+`;
+
+describe("init:i18n — astro.config fallback failures (0.4.7)", () => {
+    it("CLI and CI validator fail with the same reason for sveltia(options)", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "astro.config.mjs"), ASTRO_VARIABLE_CONFIG);
+
+        const cliError = captureFailure([], cwd).join("\n");
+        const ci = runValidator(ASTRO_VARIABLE_CONFIG, "de,fr", {
+            configPath: "astro.config.mjs",
+        });
+
+        expect(ci.code).toBe(1);
+
+        for (const text of [cliError, ci.errors.join("\n")]) {
+            expect(text).toContain("变量引用");
+            expect(text).toContain("请用 --config");
+        }
+
+        expect(existsSync(workflowPath(cwd))).toBe(false);
+    });
+
+    it("CLI and CI validator fail with the same reason for dynamic locales", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "astro.config.mjs"), ASTRO_DYNAMIC_LOCALES);
+
+        const cliError = captureFailure([], cwd).join("\n");
+        const ci = runValidator(ASTRO_DYNAMIC_LOCALES, "de,fr", {
+            configPath: "astro.config.mjs",
+        });
+
+        expect(ci.code).toBe(1);
+
+        for (const text of [cliError, ci.errors.join("\n")]) {
+            expect(text).toContain("字面量数组");
+            expect(text).toContain("请用 --config");
+        }
+
+        expect(existsSync(workflowPath(cwd))).toBe(false);
+    });
+
+    it("distinguishes a missing config from an existing-but-unparsable one", () => {
+        const errors = captureFailure([], makeTempDir()).join("\n");
+
+        expect(errors).toContain("未找到 Sveltia CMS 配置文件");
+        expect(errors).not.toContain("变量引用");
+    });
+});
+
+describe("init:i18n — astro.config fallback parsing (0.4.7)", () => {
+    it("resolves an import alias and ignores sitemap locales", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "astro.config.mjs"), ASTRO_ALIAS_CONFIG);
+
+        captureRun([], cwd);
+
+        expect(workflowEnv(cwd).CONFIG_FILE).toBe("astro.config.mjs");
+        expect(workflowEnv(cwd).TARGET_LANGS).toBe("de,fr");
+        expect(
+            runValidator(ASTRO_ALIAS_CONFIG, "de,fr", {
+                configPath: "astro.config.mjs",
+            }).code,
+        ).toBe(0);
+    });
+
+    it("keeps a dedicated CMS config as the higher-priority source", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), minimalConfig("'en','fr'"));
+        writeFileSync(join(cwd, "astro.config.mjs"), ASTRO_ALIAS_CONFIG);
+
+        captureRun([], cwd);
+
+        expect(workflowEnv(cwd).CONFIG_FILE).toBe("sveltia-cms.config.mjs");
+        expect(workflowEnv(cwd).TARGET_LANGS).toBe("fr");
+    });
+});
+
+describe("init:i18n — real language detection (0.4.7)", () => {
+    it("uses the config alone and warns when the content root is absent", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            minimalConfig("'en','fr','de'"),
+        );
+
+        const { log } = captureRun([], cwd);
+
+        expect(workflowEnv(cwd).TARGET_LANGS).toBe("de,fr");
+        expect(log.join("\n")).toContain("Sveltia 配置（i18n.locales）");
+        expect(log.join("\n")).toContain("content-root 不存在");
+        expect(log.join("\n")).toContain("--content-root");
+    });
+
+    it("detects languages purely from the filesystem", () => {
+        const cwd = makeTempDir();
+        const config = minimalConfig("'en'");
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), config);
+        writeContentTree(cwd, { blog: { fr: ["a.md"], de: ["b.md"] } });
+
+        const { log } = captureRun([], cwd);
+        const env = workflowEnv(cwd);
+
+        expect(env.TARGET_LANGS).toBe("de,fr");
+        expect(env.DETECTED_LANGS).toBe("de,fr");
+        expect(log.join("\n")).toContain("文件系统实测并集");
+        expect(log.join("\n")).toContain("目录存在但配置未声明");
+        expect(
+            runValidator(config, "de,fr", {
+                configPath: "sveltia-cms.config.mjs",
+                detectedLangs: "de,fr",
+            }).code,
+        ).toBe(0);
+    });
+
+    it("merges config and disk and lists both kinds of difference", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            minimalConfig("'en','fr','de'"),
+        );
+        writeContentTree(cwd, { blog: { fr: ["a.md"], zh: ["b.md"] } });
+
+        const { log } = captureRun([], cwd);
+        const output = log.join("\n");
+
+        expect(workflowEnv(cwd).TARGET_LANGS).toBe("de,fr,zh");
+        expect(output).toContain("配置声明但目录不存在：de");
+        expect(output).toContain("目录存在但配置未声明：zh");
+    });
+
+    it("fails with an actionable hint when no target language exists", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), minimalConfig("'en'"));
+
+        const errors = captureFailure([], cwd).join("\n");
+
+        expect(errors).toContain("没有可翻译的目标语言");
+        expect(errors).toContain("--locales");
+        expect(errors).toContain("--content-root");
+        expect(existsSync(workflowPath(cwd))).toBe(false);
+    });
+
+    it("keeps region variants distinct and compares casing-insensitively", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            minimalConfig("'en','zh','zh-CN','fr'"),
+        );
+        writeContentTree(cwd, {
+            blog: { "zh-CN": ["a.md"], "pt-BR": ["b.md"], FR: ["c.md"] },
+        });
+
+        const { log } = captureRun([], cwd);
+
+        expect(workflowEnv(cwd).TARGET_LANGS).toBe("fr,pt-BR,zh,zh-CN");
+        expect(log.join("\n")).toContain("pt-BR");
+        // `FR/` is the same key as declared `fr`, so it is not a phantom diff.
+        expect(log.join("\n")).not.toContain("未声明：FR");
+    });
+
+    it("ignores .gitkeep-only and hidden directories", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), minimalConfig("'en','fr'"));
+        writeContentTree(cwd, {
+            blog: { fr: ["a.md"], xx: [".gitkeep"], ".draft": ["b.md"] },
+        });
+
+        captureRun([], cwd);
+
+        expect(workflowEnv(cwd).TARGET_LANGS).toBe("fr");
+        expect(workflowEnv(cwd).DETECTED_LANGS).toBe("fr");
+    });
+
+    it("reads frontmatter locale for non multiple_folders structures", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            minimalConfig("'en','fr'", "single_file"),
+        );
+        const collection = join(cwd, "src", "content", "blog");
+        mkdirSync(collection, { recursive: true });
+        writeFileSync(
+            join(collection, "post.md"),
+            "---\nlocale: fr\ntitle: fixture\n---\nbody\n",
+        );
+
+        captureRun([], cwd);
+
+        expect(workflowEnv(cwd).I18N_STRUCTURE).toBe("single_file");
+        expect(workflowEnv(cwd).TARGET_LANGS).toBe("fr");
+        expect(workflowEnv(cwd).DETECTED_LANGS).toBe("fr");
+    });
+
+    it("lets --locales override both config and disk", () => {
+        const cwd = makeTempDir();
+        const config = minimalConfig("'en','fr','de'");
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), config);
+        writeContentTree(cwd, { blog: { zh: ["a.md"] } });
+
+        const { log } = captureRun(["--locales", "es,it"], cwd);
+        const env = workflowEnv(cwd);
+
+        expect(env.TARGET_LANGS).toBe("es,it");
+        expect(env.LANGS_OVERRIDE).toBe("es,it");
+        expect(env.DETECTED_LANGS).toBe("zh");
+        expect(log.join("\n")).toContain("--locales 显式指定");
+        expect(
+            runValidator(config, "es,it", {
+                configPath: "sveltia-cms.config.mjs",
+                override: "es,it",
+                detectedLangs: "zh",
+            }).code,
+        ).toBe(0);
+    });
+
+    it("lets --default-locale win over the config default", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "sveltia-cms.config.mjs"),
+            minimalConfig("'en','fr','de'"),
+        );
+
+        const { log } = captureRun(["--default-locale", "fr"], cwd);
+
+        expect(workflowEnv(cwd).DEFAULT_LOCALE).toBe("fr");
+        expect(workflowEnv(cwd).TARGET_LANGS).toBe("de,en");
+        expect(log.join("\n")).toContain("源语言 fr");
+    });
+
+    it("the CI validator accepts the union snapshot and rejects a stale list", () => {
+        const cwd = makeTempDir();
+        const config = minimalConfig("'en','fr','de'");
+        writeFileSync(join(cwd, "sveltia-cms.config.mjs"), config);
+        writeContentTree(cwd, { blog: { zh: ["a.md"] } });
+
+        captureRun([], cwd);
+
+        expect(workflowEnv(cwd).TARGET_LANGS).toBe("de,fr,zh");
+        expect(
+            runValidator(config, "de,fr,zh", {
+                configPath: "sveltia-cms.config.mjs",
+                detectedLangs: "zh",
+            }).code,
+        ).toBe(0);
+        expect(
+            runValidator(config, "de,fr", {
+                configPath: "sveltia-cms.config.mjs",
+                detectedLangs: "zh",
+            }).code,
+        ).toBe(1);
     });
 });
