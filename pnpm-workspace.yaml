@@ -9,6 +9,9 @@ catalog:
     vite-plus: 0.2.2
 overrides:
     vite: "catalog:"
+    zod: "4.6.6"
+    source-map-js: "1.2.2"
+    svgo: "^4.0.1"
 peerDependencyRules:
     allowAny:
         - vite

@@ -8,6 +8,22 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.4.8
+
+### 修复
+
+- **全面依赖安全升级。** 将 `zod` 锁定到 `4.6.6`、`source-map-js` 锁定到 `1.2.2`，清除了真正进入发布 tarball 运行时依赖传播链的两条 high 漏洞（`zod-to-ts → zod`、`@sveltia/cms → svgo/csso → css-tree → source-map-js`）；`svgo` 锁定到 `^4.0.1`（当前已解析为 `4.1.0`）。无功能性变更，无破坏性变更。
+- overrides 落位从 `package.json` 改为 `pnpm-workspace.yaml`：pnpm 11 已不再读取 `package.json` 的 `pnpm` 字段，写在 `pnpm.overrides` 里的配置会被静默忽略、完全不生效。
+
+### 迁移
+
+- i18n 模板版本升至 **0.4.8**。升级依赖后**必须在每个站点仓库重跑 `pnpm exec astro-sveltia-pages init:i18n`** 并提交三份重新生成的快照；CI 可用 `init:i18n --check` 拦截过期模板。不重跑会导致工作流的 `TEMPLATE_VERSION` 与已安装版本不一致。
+- **有意不对 `tinypool` 与 `vite` 做 override。** `tinypool@^1.1.0` 实测解析为 `1.1.1`，仍落在 critical 漏洞范围内（`<2.1.2`，修复版本 `>=2.1.2`），并且会把 Vitest 4 所需的 `2.1.0` 强制降级；`vite@^7.0.3` 实测解析为 `7.3.7`，会替换 catalog 锁定的 `@voidzero-dev/vite-plus-core@0.2.2`（`vp test` / `vp pack` 的核心）。二者都修不了漏洞，却会打断工具链。
+
+### 依赖审计
+
+- 升级后 `pnpm audit --prod --registry=https://registry.npmjs.org` 不再出现 `zod` 与 `source-map-js`。`--prod` 的其余条目全部来自 workspace 内 `example/` 示例应用（`sharp`、`nanoid`、`postcss`、`undici`）与 `packageManagerDependencies>pnpm`，均不进入只含 `dist/` 与 3 个运行时依赖的 tarball。
+
 ## 0.4.7
 
 ### 新增

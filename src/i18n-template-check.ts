@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Must match `version` in package.json (guarded by tests). */
-export const I18N_TEMPLATE_VERSION = "0.4.7";
+export const I18N_TEMPLATE_VERSION = "0.4.8";
 
 export const I18N_TEMPLATE_MARKER = "astro-sveltia-pages i18n template v";
 

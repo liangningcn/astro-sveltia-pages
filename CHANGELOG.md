@@ -10,6 +10,22 @@ section below.
 
 ---
 
+## 0.4.8
+
+### Fixed
+
+- **Comprehensive dependency security upgrade.** Pinned `zod` to `4.6.6` and `source-map-js` to `1.2.2`, clearing both high advisories that actually reach the published tarball's runtime dependency graph (`zod-to-ts → zod` and `@sveltia/cms → svgo/csso → css-tree → source-map-js`). `svgo` is pinned to `^4.0.1` (already resolved to `4.1.0`). No functional or breaking changes.
+- Overrides now live in `pnpm-workspace.yaml` instead of `package.json`: pnpm 11 no longer reads the `pnpm` field in `package.json` and silently ignores `pnpm.overrides`, so an override written there has no effect at all.
+
+### Migration
+
+- The i18n template version moves to **0.4.8**. After upgrading the dependency, **re-run `pnpm exec astro-sveltia-pages init:i18n` in every site repository** and commit the three regenerated snapshots; `init:i18n --check` gates stale templates in CI. Skipping this step makes the workflow's `TEMPLATE_VERSION` disagree with the installed package version.
+- `tinypool` and `vite` were deliberately **not** overridden. `tinypool@^1.1.0` resolves to `1.1.1`, which is still inside the critical advisory range (`<2.1.2`, patched in `>=2.1.2`), and would downgrade the `2.1.0` that Vitest 4 requires. `vite@^7.0.3` resolves to `7.3.7` and would replace the catalog-pinned `@voidzero-dev/vite-plus-core@0.2.2` behind `vp test` / `vp pack`. Neither fixes an advisory; both break the toolchain.
+
+### Dependency audit
+
+- After this upgrade `pnpm audit --prod --registry=https://registry.npmjs.org` no longer reports `zod` or `source-map-js`. Remaining `--prod` findings resolve to the workspace `example/` demo app (`sharp`, `nanoid`, `postcss`, `undici`) and `packageManagerDependencies>pnpm`; none of them ship in the tarball, which contains only `dist/` and three runtime dependencies.
+
 ## 0.4.7
 
 ### Added
