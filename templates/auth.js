@@ -1,7 +1,8 @@
 // Sveltia CMS GitHub OAuth proxy for Cloudflare Pages + EdgeOne Pages (auto-detected).
 // Generated from src/functions by `vp run build:templates` - do not edit.
 // Deploy as auth.js and configure GITHUB_CLIENT_ID,
-// GITHUB_CLIENT_SECRET, SITE_URL and ENVIRONMENT in the platform dashboard.
+// GITHUB_CLIENT_SECRET, SITE_URL, CMS_ORIGIN and ENVIRONMENT in the
+// platform dashboard. CMS_ORIGIN is required since 0.3.0.
 //#region src/functions/context.ts
 /**
  * Duck-typed request check.
@@ -151,32 +152,23 @@ function adapterFor(platform) {
 //#region src/functions/rate-limit.ts
 /** Default limit: 30 requests per minute per client IP. */
 var DEFAULT_RATE_LIMIT = { limit: 30, windowMs: 60 * 1e3 };
-/** Hard cap on distinct tracked clients per isolate. */
-var MAX_TRACKED_CLIENTS = 4096;
 /**
- * Evicts buckets while the map is over the cap.
+ * Bounds the map with amortised O(1) eviction.
  *
- * Without this bound an attacker that rotates the key every request (e.g. a
- * spoofed client IP) would grow the map without limit.
- *
- * Expired buckets (now >= resetAt) are reclaimed first: they carry no useful
- * state and are the cheapest to drop. Only if the map is still over the cap do
- * we evict live buckets, always dropping the one that expires soonest so
- * active clients are affected least.
+ * `Map` preserves insertion order, and with a monotonic clock the oldest
+ * bucket is also the one expiring soonest. Dropping from the front therefore
+ * reclaims expired buckets first and approximates the old "soonest-to-expire"
+ * policy without scanning the whole map for every new key. Each key is visited
+ * at most once between insertions, so a client rotating IPs cannot turn this
+ * into O(n^2) work.
  */
 function enforceCap(hits, now) {
     if (hits.size <= 4096) return;
-    for (const [key, entry] of hits) if (now >= entry.resetAt) hits.delete(key);
-    while (hits.size > MAX_TRACKED_CLIENTS) {
-        let oldestKey = null;
-        let oldestReset = Number.POSITIVE_INFINITY;
-        for (const [key, entry] of hits)
-            if (entry.resetAt < oldestReset) {
-                oldestReset = entry.resetAt;
-                oldestKey = key;
-            }
-        if (oldestKey === null) break;
-        hits.delete(oldestKey);
+    for (const key of hits.keys()) {
+        const entry = hits.get(key);
+        const expired = entry !== void 0 && now >= entry.resetAt;
+        if (hits.size > 4096 || expired) hits.delete(key);
+        else break;
     }
 }
 function createRateLimiter(options) {
@@ -185,6 +177,7 @@ function createRateLimiter(options) {
         hit(key, now = Date.now()) {
             const entry = hits.get(key);
             if (!entry || now >= entry.resetAt) {
+                hits.delete(key);
                 hits.set(key, { count: 1, resetAt: now + options.windowMs });
                 enforceCap(hits, now);
                 return true;

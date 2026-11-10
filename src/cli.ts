@@ -105,6 +105,13 @@ function envEntries(platform: InitPlatform): { key: string; comment: string }[] 
                 `# in ${envHint} (used as the OAuth origin, keeping the\n` +
                 "# callback consistent across custom domains, preview domains and local dev).",
         },
+        {
+            key: "CMS_ORIGIN",
+            comment:
+                "# REQUIRED since 0.3.0: the origin the GitHub token is posted back to,\n" +
+                "# e.g. https://example.com (https, or http://localhost for local dev).\n" +
+                `# Configure it in ${envHint}; the auth endpoint returns 500 if it is missing.`,
+        },
     ];
 }
 
@@ -244,6 +251,7 @@ ${LOG_PREFIX} Next steps:
    - GITHUB_CLIENT_SECRET
    - ENVIRONMENT=production
    - SITE_URL=https://example.com (full origin of the production site)
+   - CMS_ORIGIN=https://example.com (required since 0.3.0; https, or http://localhost for local dev)
 3. Redeploy. The CMS will be available at ${siteUrl ? `${siteUrl.replace(/\/+$/, "")}/admin/` : "<your-site-url>/admin/"}.
 `);
 
@@ -501,39 +509,72 @@ function deriveProjectName(cwd: string): string {
     return basename(cwd);
 }
 
+/**
+ * Candidate CMS config files, in priority order. `astro.config.*` comes last:
+ * the integration may be configured inline there, but a plain Astro config
+ * without a `sveltia()` call must not be mistaken for a CMS config.
+ */
+const I18N_CONFIG_CANDIDATES = [
+    "sveltia-cms.config.mjs",
+    "sveltia-cms.config.js",
+    // Real consumer repos also use the shorter `sveltia.config.mjs`
+    // name too. Previously --config was mandatory there.
+    "sveltia.config.mjs",
+    "sveltia.config.js",
+    "src/sveltia-cms.config.mjs",
+    "src/sveltia-cms.config.js",
+    "src/sveltia.config.mjs",
+    "src/sveltia.config.js",
+    // Classic Decap/Sveltia sites keep the CMS config as YAML under
+    // public/admin. 0.4.4 only understood .mjs/.js,
+    // so `init:i18n` refused to run on those repositories.
+    "public/admin/config.yml",
+    "public/admin/config.yaml",
+    "config.yml",
+    "config.yaml",
+    // Inline `sveltia({ locales: [...] })` in the Astro config, checked last.
+    "astro.config.mjs",
+    "astro.config.js",
+    "astro.config.mts",
+    "astro.config.ts",
+];
+
+/** True when a file holds an inline Sveltia CMS config with a locales list. */
+function hasInlineCmsConfig(path: string): boolean {
+    try {
+        const text = stripConfigComments(readFileSync(path, "utf-8"));
+
+        return /\bsveltia\s*\(/.test(text) && extractLocales(text).length > 0;
+    } catch {
+        return false;
+    }
+}
+
 function readI18nConfigPath(cwd: string, configArg: string | undefined): string {
-    const candidates = configArg
-        ? [configArg]
-        : [
-              "sveltia-cms.config.mjs",
-              "sveltia-cms.config.js",
-              // Real consumer repos also use the shorter `sveltia.config.mjs`
-              // name too. Previously --config was mandatory there.
-              "sveltia.config.mjs",
-              "sveltia.config.js",
-              "src/sveltia-cms.config.mjs",
-              "src/sveltia-cms.config.js",
-              "src/sveltia.config.mjs",
-              "src/sveltia.config.js",
-              // Classic Decap/Sveltia sites keep the CMS config as YAML under
-              // public/admin. 0.4.4 only understood .mjs/.js,
-              // so `init:i18n` refused to run on those repositories.
-              "public/admin/config.yml",
-              "public/admin/config.yaml",
-              "config.yml",
-              "config.yaml",
-          ];
+    const candidates = configArg ? [configArg] : I18N_CONFIG_CANDIDATES;
 
     for (const candidate of candidates) {
         const path = join(cwd, candidate);
 
-        if (existsSync(path)) {
-            return path;
+        if (!existsSync(path)) {
+            continue;
         }
+
+        // An explicit --config and the dedicated CMS config names are trusted
+        // as-is; only an Astro config needs a content check before use.
+        if (
+            !configArg &&
+            candidate.includes("astro.config.") &&
+            !hasInlineCmsConfig(path)
+        ) {
+            continue;
+        }
+
+        return path;
     }
 
     fail(
-        "未找到 Sveltia CMS 配置文件（默认查找 sveltia-cms.config.mjs / sveltia.config.mjs / public/admin/config.yml）。\n" +
+        "未找到 Sveltia CMS 配置文件（默认查找 sveltia-cms.config.mjs / sveltia.config.mjs / public/admin/config.yml / astro.config.mjs 内联 sveltia({...})）。\n" +
             "      请通过 --config <path> 指定，或在项目根目录创建其中一个（见 README）。",
     );
 }
@@ -950,16 +991,51 @@ function isI18nCommand(args: string[]): boolean {
     return args[0] === "init:i18n" || (args[0] === "init" && args.includes("--i18n"));
 }
 
+/**
+ * Flags accepted by the default OAuth `init`. Anything else is a typo and must
+ * not silently start `init`, which writes files into the project.
+ */
+const INIT_VALUE_FLAGS = new Set(["--platform", "--site-url"]);
+
+function invalidInitFlag(args: string[]): string | undefined {
+    for (let index = 0; index < args.length; index += 1) {
+        const arg = args[index] ?? "";
+
+        if (!arg.startsWith("-")) {
+            continue; // a value consumed by the previous flag
+        }
+
+        const name = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg;
+
+        if (!INIT_VALUE_FLAGS.has(name)) {
+            return arg;
+        }
+
+        const hasInlineValue = arg.includes("=");
+        const next = args[index + 1];
+
+        if (!hasInlineValue && (next === undefined || next.startsWith("-"))) {
+            return arg; // missing value
+        }
+
+        if (!hasInlineValue) {
+            index += 1; // skip the value
+        }
+    }
+
+    return undefined;
+}
+
 function failUnknownCommand(command: string): never {
     console.error(
         `${LOG_PREFIX} Unknown command: ${command}\n` +
-            "      Available commands: init, init:i18n (also `init --i18n`).\n" +
-            "      Run `astro-sveltia-pages --help` for usage.",
+            "      Available commands: init, init:i18n (also `init --i18n`).",
     );
+    console.error(CLI_USAGE);
     process.exit(1);
 }
 
-/** Dispatches one CLI invocation. Unknown subcommands fail loudly (exit 1). */
+/** Dispatches one CLI invocation. Unknown commands/flags fail loudly (exit 1). */
 export function dispatchCli(args: string[], cwd: string = process.cwd()): void {
     if (args.includes("--help") || args.includes("-h")) {
         console.log(CLI_USAGE);
@@ -977,10 +1053,17 @@ export function dispatchCli(args: string[], cwd: string = process.cwd()): void {
 
     const first = args[0];
 
-    // Keep the historical behaviour: no command, an explicit `init`, or a bare
-    // flag (e.g. `--platform edgeone`) all run the OAuth init.
+    // No command, an explicit `init`, or a bare flag set all run the OAuth
+    // init — but only after verifying every flag is one we actually support.
     if (!first || first === "init" || first.startsWith("-")) {
-        runInit(first === "init" ? args.slice(1) : args, cwd);
+        const initArgs = first === "init" ? args.slice(1) : args;
+        const invalid = invalidInitFlag(initArgs);
+
+        if (invalid) {
+            failUnknownCommand(invalid);
+        }
+
+        runInit(initArgs, cwd);
         return;
     }
 

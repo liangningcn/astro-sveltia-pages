@@ -991,6 +991,67 @@ describe("init:i18n — YAML CMS config (0.4.5)", () => {
     });
 });
 
+// An Astro config with an inline `sveltia({...})` call is a valid CMS config
+// source. Regression: the candidate list stopped at config.yml, so
+// `init:i18n` reported "config not found" on those repositories.
+const ASTRO_INLINE_CONFIG = `import { defineConfig } from "astro/config";
+import sveltia from "astro-sveltia-pages";
+
+// CMS UI locale: 'zh' - a comment, not a content locale.
+export default defineConfig({
+  site: "https://example.com",
+  integrations: [
+    sveltia({
+      i18n: {
+        structure: "multiple_folders",
+        default_locale: "en",
+        locales: ["en", "fr", "de"],
+      },
+    }),
+  ],
+});
+`;
+
+describe("init:i18n — inline astro.config fallback", () => {
+    it("finds sveltia({...}) when no standalone CMS config exists", () => {
+        const cwd = makeTempDir();
+        writeFileSync(join(cwd, "astro.config.mjs"), ASTRO_INLINE_CONFIG);
+
+        runInitI18n([], cwd);
+
+        const doc = jsYaml.load(readFileSync(workflowPath(cwd), "utf-8")) as YamlDoc;
+        expect(doc.env.CONFIG_FILE).toBe("astro.config.mjs");
+        expect(doc.env.TARGET_LANGS).toBe("de,fr");
+    });
+
+    it("the CI validator parses the inline config identically", () => {
+        expect(runValidator(ASTRO_INLINE_CONFIG, "de,fr").code).toBe(0);
+        expect(runValidator(ASTRO_INLINE_CONFIG, "zh").code).toBe(1);
+    });
+
+    it("ignores a plain astro.config.mjs with no inline CMS config", () => {
+        const cwd = makeTempDir();
+        writeFileSync(
+            join(cwd, "astro.config.mjs"),
+            `import { defineConfig } from "astro/config";\n` +
+                `export default defineConfig({ site: "https://example.com" });\n`,
+        );
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code: number,
+        ) => {
+            throw new Error(`process.exit(${String(code)})`);
+        }) as never);
+        const console_ = captureConsole();
+
+        try {
+            expect(() => runInitI18n([], cwd)).toThrow(/process\.exit\(1\)/);
+        } finally {
+            console_.restore();
+            exitSpy.mockRestore();
+        }
+    });
+});
+
 describe("init:i18n — configurable translation commit author (0.4.5)", () => {
     it("fills the author placeholders from --commit-author", () => {
         const cwd = makeTempDir();

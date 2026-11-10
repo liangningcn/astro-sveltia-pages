@@ -5,6 +5,7 @@ import {
     mkdtempSync,
     readFileSync,
     rmSync,
+    statSync,
     symlinkSync,
     writeFileSync,
 } from "node:fs";
@@ -19,6 +20,29 @@ import { dispatchCli, runInit } from "../src/cli.ts";
 const TEMPLATE_PATH = fileURLToPath(new URL("../templates/auth.js", import.meta.url));
 const DIST_DIR = fileURLToPath(new URL("../dist", import.meta.url));
 const BUILT_CLI = join(DIST_DIR, "cli.mjs");
+// The symlink group spawns dist/cli.mjs. A stale build must not be tested as
+// if it were current code (that produced 3 confusing failures before).
+const CLI_SOURCES = [
+    "../src/cli.ts",
+    "../src/i18n-template-check.ts",
+    "../src/options.ts",
+].map((relativePath) => fileURLToPath(new URL(relativePath, import.meta.url)));
+
+function isBuiltCliFresh(): boolean {
+    if (!existsSync(BUILT_CLI)) {
+        return false;
+    }
+
+    const builtAt = statSync(BUILT_CLI).mtimeMs;
+
+    return CLI_SOURCES.every((source) => statSync(source).mtimeMs <= builtAt);
+}
+
+if (existsSync(BUILT_CLI) && !isBuiltCliFresh()) {
+    console.warn(
+        "[cli.test] dist/cli.mjs is older than its sources - run `pnpm build`; skipping symlink tests.",
+    );
+}
 
 const tempDirs: string[] = [];
 
@@ -68,7 +92,7 @@ describe("init — first run", () => {
         );
     });
 
-    it("creates .env.example with the four OAuth variables", () => {
+    it("creates .env.example with all five OAuth variables", () => {
         const cwd = makeTempDir();
 
         runInit([], cwd);
@@ -78,8 +102,26 @@ describe("init — first run", () => {
         expect(content).toMatch(/^GITHUB_CLIENT_SECRET=$/m);
         expect(content).toMatch(/^ENVIRONMENT=$/m);
         expect(content).toMatch(/^SITE_URL=$/m);
+        expect(content).toMatch(/^CMS_ORIGIN=$/m);
+        expect(content).toContain("REQUIRED since 0.3.0");
         expect(content).toContain("Cloudflare Pages");
         expect(content).toContain("Do not commit real values");
+    });
+
+    it("adds CMS_ORIGIN to an .env.example written before 0.3.0", () => {
+        const cwd = makeTempDir();
+        const envPath = join(cwd, ".env.example");
+
+        writeFileSync(
+            envPath,
+            "GITHUB_CLIENT_ID=\nGITHUB_CLIENT_SECRET=\nENVIRONMENT=\nSITE_URL=\n",
+        );
+        runInit([], cwd);
+
+        const content = readFileSync(envPath, "utf-8");
+        expect(content).toMatch(/^CMS_ORIGIN=$/m);
+        // Existing entries are preserved rather than duplicated.
+        expect(content.match(/^SITE_URL=$/gm)).toHaveLength(1);
     });
 
     it("prints guidance with the callback URL from --site-url", () => {
@@ -92,6 +134,7 @@ describe("init — first run", () => {
             const output = console_.log.join("\n");
             expect(output).toContain("https://github.com/settings/developers");
             expect(output).toContain("https://example.com/auth");
+            expect(output).toContain("CMS_ORIGIN=");
         } finally {
             console_.restore();
         }
@@ -344,7 +387,9 @@ describe("CLI command dispatch", () => {
 // so the old strict equality check skipped the whole CLI (exit 0, no output).
 // These spawn the built CLI; they run once `pnpm build` has produced dist/.
 describe("CLI entry detection via a pnpm-style symlink", () => {
-    const runIt = existsSync(BUILT_CLI) ? it : it.skip;
+    // A dist/ that merely exists is not enough: it must be newer than its
+    // sources, otherwise these assertions test a stale CLI.
+    const runIt = isBuiltCliFresh() ? it : it.skip;
 
     function withLinkedDist(fn: (cliPath: string, cwd: string) => void): void {
         const cwd = makeTempDir();
@@ -369,6 +414,36 @@ describe("CLI entry detection via a pnpm-style symlink", () => {
 
         expect(result.status).toBe(1);
         expect(result.stderr).toContain("Unknown command: definitely-not-a-command");
+    });
+
+    runIt("rejects unknown flags instead of running init with side effects", () => {
+        const cwd = makeTempDir();
+
+        for (const flag of ["--version", "--hel", "--platform", "--site-url"]) {
+            const result = spawnSync(process.execPath, [BUILT_CLI, flag], {
+                cwd,
+                encoding: "utf-8",
+            });
+
+            expect(result.status).toBe(1);
+            expect(result.stderr).toContain(`Unknown command: ${flag}`);
+            expect(result.stderr).toContain("Usage:");
+        }
+
+        expect(existsSync(join(cwd, "functions", "auth.js"))).toBe(false);
+        expect(existsSync(join(cwd, ".env.example"))).toBe(false);
+    });
+
+    runIt("still accepts the supported init flags", () => {
+        const cwd = makeTempDir();
+        const result = spawnSync(
+            process.execPath,
+            [BUILT_CLI, "--platform", "edgeone", "--site-url", "https://example.com"],
+            { cwd, encoding: "utf-8" },
+        );
+
+        expect(result.status).toBe(0);
+        expect(existsSync(join(cwd, "edge-functions", "auth.js"))).toBe(true);
     });
 
     runIt("does not silently exit when reached through a symlink", () => {

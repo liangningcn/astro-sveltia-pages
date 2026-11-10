@@ -30,15 +30,14 @@ export type RateLimiter = {
 };
 
 /**
- * Evicts buckets while the map is over the cap.
+ * Bounds the map with amortised O(1) eviction.
  *
- * Without this bound an attacker that rotates the key every request (e.g. a
- * spoofed client IP) would grow the map without limit.
- *
- * Expired buckets (now >= resetAt) are reclaimed first: they carry no useful
- * state and are the cheapest to drop. Only if the map is still over the cap do
- * we evict live buckets, always dropping the one that expires soonest so
- * active clients are affected least.
+ * `Map` preserves insertion order, and with a monotonic clock the oldest
+ * bucket is also the one expiring soonest. Dropping from the front therefore
+ * reclaims expired buckets first and approximates the old "soonest-to-expire"
+ * policy without scanning the whole map for every new key. Each key is visited
+ * at most once between insertions, so a client rotating IPs cannot turn this
+ * into O(n^2) work.
  */
 function enforceCap(
     hits: Map<string, { count: number; resetAt: number }>,
@@ -48,30 +47,15 @@ function enforceCap(
         return;
     }
 
-    // Pass 1: expired buckets are reclaimed before any live one.
-    for (const [key, entry] of hits) {
-        if (now >= entry.resetAt) {
+    for (const key of hits.keys()) {
+        const entry = hits.get(key);
+        const expired = entry !== undefined && now >= entry.resetAt;
+
+        if (hits.size > MAX_TRACKED_CLIENTS || expired) {
             hits.delete(key);
-        }
-    }
-
-    // Pass 2: while still over the cap, evict the soonest-to-expire live bucket.
-    while (hits.size > MAX_TRACKED_CLIENTS) {
-        let oldestKey: string | null = null;
-        let oldestReset = Number.POSITIVE_INFINITY;
-
-        for (const [key, entry] of hits) {
-            if (entry.resetAt < oldestReset) {
-                oldestReset = entry.resetAt;
-                oldestKey = key;
-            }
-        }
-
-        if (oldestKey === null) {
+        } else {
             break;
         }
-
-        hits.delete(oldestKey);
     }
 }
 
@@ -83,6 +67,9 @@ export function createRateLimiter(options: RateLimitOptions): RateLimiter {
             const entry = hits.get(key);
 
             if (!entry || now >= entry.resetAt) {
+                // Re-insert so a refreshed bucket moves to the tail of the FIFO
+                // instead of keeping its original (now stale) position.
+                hits.delete(key);
                 hits.set(key, { count: 1, resetAt: now + options.windowMs });
                 enforceCap(hits, now);
 

@@ -51,7 +51,8 @@ function banner(target) {
         `// Sveltia CMS GitHub OAuth proxy for ${target.platform}.`,
         "// Generated from src/functions by `vp run build:templates` - do not edit.",
         `// Deploy as ${target.target} and configure GITHUB_CLIENT_ID,`,
-        "// GITHUB_CLIENT_SECRET, SITE_URL and ENVIRONMENT in the platform dashboard.",
+        "// GITHUB_CLIENT_SECRET, SITE_URL, CMS_ORIGIN and ENVIRONMENT in the",
+        "// platform dashboard. CMS_ORIGIN is required since 0.3.0.",
         "",
     ].join("\n");
 }

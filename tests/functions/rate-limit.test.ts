@@ -82,7 +82,7 @@ describe("createRateLimiter", () => {
         expect(limiter.size).toBeLessThanOrEqual(MAX_TRACKED_CLIENTS);
     });
 
-    it("evicts expired buckets before live ones in enforceCap", () => {
+    it("reclaims expired buckets once the cap is exceeded", () => {
         const limiter = createRateLimiter({ limit: 1_000_000, windowMs: 1000 });
 
         // A single live bucket that expires far in the future.
@@ -96,10 +96,44 @@ describe("createRateLimiter", () => {
         // A brand-new hit at t=5000 triggers enforceCap while over the cap.
         limiter.hit("new", 5000);
 
-        // Expired buckets are dropped first, so the map shrinks well below the
-        // cap and the live bucket survives.
+        // FIFO drops from the front: the leading `live` bucket goes first (it
+        // is the oldest), then every expired bucket is reclaimed in the same
+        // pass, leaving only the just-inserted `new` bucket. Evicting a live
+        // bucket resets its quota, which is acceptable for a best-effort
+        // per-isolate limiter and is the cost of O(1) eviction.
         expect(limiter.size).toBeLessThanOrEqual(MAX_TRACKED_CLIENTS);
-        expect(limiter.size).toBe(2);
+        expect(limiter.size).toBe(1);
         expect(limiter.hit("live", 5000)).toBe(true);
+    });
+
+    it("evicts the oldest bucket first once the cap is exceeded", () => {
+        const limiter = createRateLimiter({ limit: 1, windowMs: 1_000_000 });
+
+        expect(limiter.hit("oldest", 0)).toBe(true);
+        expect(limiter.hit("newest", 0)).toBe(true);
+
+        for (let i = 0; i < MAX_TRACKED_CLIENTS; i += 1) {
+            limiter.hit(`client-${i}`, 0);
+        }
+
+        expect(limiter.size).toBe(MAX_TRACKED_CLIENTS);
+        // The two earliest keys were dropped from the front of the FIFO.
+        expect(limiter.hit("oldest", 0)).toBe(true);
+        // A key inserted at the tail survived with its original count.
+        expect(limiter.hit(`client-${MAX_TRACKED_CLIENTS - 1}`, 0)).toBe(false);
+    });
+
+    it("stays linear when an attacker rotates the client key", () => {
+        const limiter = createRateLimiter({ limit: 1_000_000, windowMs: 60_000 });
+        const startedAt = performance.now();
+
+        for (let i = 0; i < 20_000; i += 1) {
+            limiter.hit(`client-${i}`, i);
+        }
+
+        // The old O(n^2) eviction took >8s for 20k keys; the FIFO path takes
+        // a few ms. 2s is deliberately generous to stay stable on slow CI.
+        expect(performance.now() - startedAt).toBeLessThan(2_000);
+        expect(limiter.size).toBeLessThanOrEqual(MAX_TRACKED_CLIENTS);
     });
 });
