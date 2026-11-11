@@ -8,6 +8,17 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.4.9
+
+### 变更
+
+- **清理 `package.json`、统一强制 pnpm。** `package.json` 不再含 `pnpm` 字段（0.4.8 已移除：pnpm 11 不再读取该字段，`overrides` 已迁至 `pnpm-workspace.yaml`）；保留 `devEngines.packageManager: pnpm` 作为唯一的包管理器约束。无功能性变更，无破坏性变更。
+- 版本与 i18n 模板版本同步升至 **0.4.9**，为下游站点仓库提供明确的升级信号与新的模板快照。
+
+### 迁移
+
+- 升级依赖后**必须在每个站点仓库重跑 `pnpm exec astro-sveltia-pages init:i18n`** 并提交三份重新生成的快照；CI 可用 `init:i18n --check` 拦截过期模板。
+
 ## 0.4.8
 
 ### 修复

@@ -10,6 +10,17 @@ section below.
 
 ---
 
+## 0.4.9
+
+### Changed
+
+- **Housekeeping release: clean up `package.json` and enforce pnpm.** `package.json` carries no `pnpm` field (removed in 0.4.8 because pnpm 11 no longer reads it; `overrides` now live in `pnpm-workspace.yaml`). `devEngines.packageManager: pnpm` remains the single enforced package-manager constraint. No functional or breaking changes.
+- Version and i18n template version bumped to **0.4.9** so site repositories get an unambiguous upgrade signal and a fresh template snapshot.
+
+### Migration
+
+- After upgrading, re-run `pnpm exec astro-sveltia-pages init:i18n` in every site repository and commit the three regenerated snapshots; `init:i18n --check` gates stale templates in CI.
+
 ## 0.4.8
 
 ### Fixed
