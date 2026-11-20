@@ -8,11 +8,15 @@ export const LOG_PREFIX = "[astro-sveltia-pages]";
  * Minimal shape the package needs for a Sveltia collection. Any additional
  * Sveltia collection option (e.g. `create`, `slug`, `i18n`, `media_folder`)
  * is passed through to the generated config unchanged.
+ *
+ * Either `folder` (one file per entry) or `file` (a single JSON array holding
+ * all entries) is required — mirroring Sveltia's own entry collection shape.
  */
 export type SveltiaCollection = {
     name: string;
     label?: string;
-    folder: string;
+    folder?: string;
+    file?: string;
     fields: unknown[];
 } & Record<string, unknown>;
 
@@ -53,7 +57,7 @@ export type SveltiaPagesOptions = {
     backendName?: string;
     /**
      * Sveltia CMS version loaded from unpkg, without the leading `@`.
-     * Default: `0.256.1` (pinned; previously `latest`).
+     * Default: `0.270.0` (pinned; previously `latest`).
      */
     sveltiaVersion?: string;
     /**
@@ -181,8 +185,11 @@ export function validateOptions(options: SveltiaPagesOptions): void {
             fail(`collections[${index}].name is required.`);
         }
 
-        if (!isNonEmptyString(collection.folder)) {
-            fail(`collections[${index}].folder is required.`);
+        if (
+            !isNonEmptyString(collection.folder) &&
+            !isNonEmptyString(collection.file)
+        ) {
+            fail(`collections[${index}].folder or file is required.`);
         }
 
         if (!Array.isArray(collection.fields)) {

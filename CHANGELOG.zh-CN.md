@@ -8,6 +8,37 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.5.0
+
+### 新增
+
+- **Content Loader 多格式支持。** `sveltiaLoader` 现已支持 Sveltia CMS 可配置的全部条目存储格式，不再仅限 Markdown 文件夹集合：
+    - folder 集合 + 纯数据文件 —— `json`、`yaml`/`yml`、`toml`（每条一个文件）；
+    - folder 集合 + 带 frontmatter 的 Markdown —— `frontmatter`（默认值）、`yaml-frontmatter`、`toml-frontmatter`；
+    - file 集合（`file`）—— 单个 JSON 数组存放全部条目，每条作为一条条目加载，ID 为 0 起算的数组下标（与 Sveltia 按位置定义的 slug 一致）。
+      无论何种格式，Zod schema 均由 CMS 的 `fields` 自动生成；`body` 字段仅在前置 frontmatter 类格式下排除，与此前一致。现有 Markdown folder 集合行为**完全不变**，对存量用户零影响。
+- 新增 `resolveFormat()`：归一化 `yml` 别名（`yml` 与 `yaml` 是同一种格式），并在 format 省略时按扩展名推断，与 Sveltia 自身语义一致。
+
+### 变更
+
+- **`@sveltia/cms` 固定到 `0.270.0`**（原 `^0.256.1`），`DEFAULT_SVELTIA_VERSION` 由 `0.256.1` 提升至 `0.270.0`。从 unpkg 加载的 CMS UI 现与构建期使用的 `@sveltia/cms` 类型定义对齐，消除了此前的类型/运行时漂移。
+- 同 major 内的依赖升级（均停留在各自当前主版本内）：`astro` `^7.4.13`、`vitest` `^4.1.12`、`js-yaml` `^4.3.2`、`zod-to-ts` `^2.1.0`、`@types/node` `^26.6.6`。`typescript` 6.0.3 已是 6.x 最新；`bumpp` 与 `@typescript/native-preview` 不动（更高主版本 / 预览版风险）。
+- `SveltiaCollection` 现接受 `folder` **或** `file`（加 `fields`）；集成启动校验不再拒绝基于文件的 entry collection。folder 集合复用 `glob()` loader，file 集合复用 Astro 内置 `file()` loader（配一个按下标建 key 的 parser），不重复造解析逻辑。
+- i18n 模板版本升至 **0.5.0**，为下游站点仓库提供明确的升级信号；本次未改动 i18n 模板内容。
+
+### 限制（中英 README 均已注明）
+
+- **不支持 `json-frontmatter`**：Astro 内置 glob 解析器只识别 `---` 与 `+++` 分隔符，不识别 `{ }`。需要 JSON 数据请改用 `json` 的 folder 集合（每条一个 `.json` 文件），该路径完全可用。
+- `raw` 格式会报错：Astro 没有内置的纯文本解析器。如有需要，请先为对应扩展名注册自定义 content entry type。
+- file 集合不支持 `locale` 参数（所有语言都存放在同一个 JSON 数组里），传入会报错。
+- `files` 形式的集合（多个互不相关、各有一组字段的文件）、`{{locale}}` 文件夹占位符、顶层列表 / 键值存储（`root: true`）仍被拒绝。
+
+### 迁移
+
+- **无需改动 CMS 配置、frontmatter 或 Secret。** 现有 Markdown folder 集合继续按原样工作——本次升级为纯增量。
+- 要使用新格式，在集合上设置 `format`（可选 `extension`），或用 `file` 指向单个 JSON 数组。格式表与示例见任一 README 的「Content Loader」章节。
+- 升级后**必须在每个站点仓库重跑 `pnpm exec astro-sveltia-pages init:i18n`** 并提交三份重新生成的快照；模板版本戳升至 `0.5.0`，CI 可用 `init:i18n --check` 拦截过期模板。模板内容本身未变——这只是标准升级步骤，不涉及工作流迁移。
+
 ## 0.4.9
 
 ### 变更

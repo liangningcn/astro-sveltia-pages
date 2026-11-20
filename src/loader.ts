@@ -1,15 +1,16 @@
 import type { CmsConfig, EntryCollection, Field, I18nOptions } from "@sveltia/cms";
-import { glob } from "astro/loaders";
+import { file as fileLoader, glob } from "astro/loaders";
 import type { Loader, LoaderContext } from "astro/loaders";
 
 import {
     getI18nConfig,
-    isEntryCollection,
+    isFileBackedCollection,
+    isSupportedCollection,
     readCmsConfig,
     resolveCollection,
 } from "./config.js";
-import type { FolderCollection } from "./config.js";
-import { frontmatterFormats } from "./schema.js";
+import type { FileBackedCollection, FolderCollection } from "./config.js";
+import { frontmatterFormats, resolveFormat } from "./schema.js";
 import { transformFieldValues } from "./transforms.js";
 import { buildCollectionSchema } from "./type-gen.js";
 
@@ -24,6 +25,7 @@ export type SveltiaLoaderOptions = {
     /**
      * Locale folder to load from. Required when the CMS config uses the
      * `multiple_folders` i18n structure; ignored when i18n is not configured.
+     * Not supported for file collections (`file`).
      */
     locale?: string;
 };
@@ -32,7 +34,7 @@ function wrapContextWithTransforms(
     context: LoaderContext,
     collection: EntryCollection,
 ): LoaderContext {
-    const excludeBody = frontmatterFormats.has(collection.format);
+    const excludeBody = frontmatterFormats.has(resolveFormat(collection));
     return {
         ...context,
         parseData: <TData extends Record<string, unknown>>(opts: {
@@ -50,7 +52,7 @@ function wrapContextWithTransforms(
     };
 }
 
-function defaultExtension(format: EntryCollection["format"]): string {
+function defaultExtension(format: string): string {
     switch (format) {
         case "yaml":
             return "yml";
@@ -63,6 +65,30 @@ function defaultExtension(format: EntryCollection["format"]): string {
         default:
             return "md";
     }
+}
+
+/**
+ * Parser for Astro's `file()` loader. Sveltia file collections store a JSON
+ * array where an entry's slug is its position in the array, while the `file()`
+ * loader derives IDs from an `id`/`slug` field or from object keys. Turning
+ * the array into a keyed object makes the 0-based array index the entry ID.
+ * An already-keyed object is passed through unchanged.
+ */
+export function jsonArrayToKeyedObject(
+    text: string,
+): Record<string, Record<string, unknown>> {
+    const data: unknown = JSON.parse(text);
+    if (Array.isArray(data)) {
+        return Object.fromEntries(
+            data.map((item, index) => [String(index), item as Record<string, unknown>]),
+        );
+    }
+    if (typeof data === "object" && data !== null) {
+        return data as Record<string, Record<string, unknown>>;
+    }
+    throw new Error(
+        `[sveltiaLoader] Expected a JSON array or object in the file collection, got ${typeof data}.`,
+    );
 }
 
 function resolveI18n(
@@ -117,12 +143,35 @@ function resolveBaseFolder(
     return `${collection.folder}/${locale}`;
 }
 
+function loadFolderCollection(
+    collection: FolderCollection,
+    config: CmsConfig | null,
+    context: LoaderContext,
+    locale: string | undefined,
+): Promise<void> {
+    const base = resolveBaseFolder(collection, config, locale);
+    const extension =
+        collection.extension ?? defaultExtension(resolveFormat(collection));
+    return glob({ pattern: `**/*.${extension}`, base }).load(
+        wrapContextWithTransforms(context, collection),
+    );
+}
+
+function loadFileCollection(
+    collection: FileBackedCollection,
+    context: LoaderContext,
+): Promise<void> {
+    return fileLoader(collection.file, { parser: jsonArrayToKeyedObject }).load(
+        wrapContextWithTransforms(context, collection),
+    );
+}
+
 export function sveltiaLoader(
     collectionOrName: string | EntryCollection,
     options?: SveltiaLoaderOptions,
 ): SveltiaLoader {
     const getCollection = (): {
-        collection: FolderCollection;
+        collection: FolderCollection | FileBackedCollection;
         config: CmsConfig | null;
     } => {
         let config: CmsConfig | null = null;
@@ -142,14 +191,28 @@ export function sveltiaLoader(
             }
         }
 
-        if (!isEntryCollection(collection)) {
+        if (!isSupportedCollection(collection)) {
             throw new Error(
-                `[sveltiaLoader] Collection "${collection.name}" must have a non-empty folder and a fields array. File-backed collections are not supported.`,
+                `[sveltiaLoader] Collection "${collection.name}" must have a non-empty "folder" or "file" and a "fields" array.`,
             );
         }
-        if (collection.folder.includes("{{locale}}")) {
+        if (isFileBackedCollection(collection)) {
+            if (options?.locale !== undefined) {
+                throw new Error(
+                    `[sveltiaLoader] The "locale" option is not supported for file collections: ` +
+                        `"${collection.name}" uses "file", which stores all locales in one JSON array.`,
+                );
+            }
+        } else if (collection.folder.includes("{{locale}}")) {
             throw new Error(
                 `[sveltiaLoader] Collection "${collection.name}" uses a {{locale}} folder placeholder, which is not supported.`,
+            );
+        }
+        if (resolveFormat(collection) === "raw") {
+            throw new Error(
+                `[sveltiaLoader] Collection "${collection.name}" uses the "raw" format, which is not supported: ` +
+                    `Astro has no built-in parser for raw text files. Use another format, or register a ` +
+                    `custom content entry type for the file extension first.`,
             );
         }
         return { collection, config };
@@ -159,18 +222,19 @@ export function sveltiaLoader(
         name: "sveltia-cms",
         createSchema: async () => {
             const { collection, config } = getCollection();
+            if (isFileBackedCollection(collection)) {
+                return buildCollectionSchema(collection);
+            }
             // Fail early when the CMS requires a locale but none was given.
             resolveBaseFolder(collection, config, options?.locale);
             return buildCollectionSchema(collection);
         },
         load: async (context) => {
             const { collection, config } = getCollection();
-            const base = resolveBaseFolder(collection, config, options?.locale);
-            const extension =
-                collection.extension ?? defaultExtension(collection.format);
-            return glob({ pattern: `**/*.${extension}`, base }).load(
-                wrapContextWithTransforms(context, collection),
-            );
+            if (isFileBackedCollection(collection)) {
+                return loadFileCollection(collection, context);
+            }
+            return loadFolderCollection(collection, config, context, options?.locale);
         },
     } satisfies SveltiaLoader;
 }

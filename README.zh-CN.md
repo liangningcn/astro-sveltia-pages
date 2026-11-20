@@ -122,7 +122,7 @@ astro build
 | `appTitle`          | `string`                    | `"Sveltia CMS"`        | 浏览器标签 / 登录页标题。                                                                       |
 | `logo`              | `{ src, ... }`              | —                      | CMS 徽标，转发为 `logo`。                                                                       |
 | `backendName`       | `string`                    | `"github"`             | Git 后端名称。                                                                                  |
-| `sveltiaVersion`    | `string`                    | `"0.256.1"`            | 从 unpkg 加载的 Sveltia 版本，**已锁定**以保证可复现（此前为 `"latest"`）。仅在有意升级时覆盖。 |
+| `sveltiaVersion`    | `string`                    | `"0.270.0"`            | 从 unpkg 加载的 Sveltia 版本，**已锁定**以保证可复现（此前为 `"latest"`）。仅在有意升级时覆盖。 |
 | `extraConfig`       | `object`                    | —                      | 逃生通道，浅合并进生成的配置。与生成值冲突的键会覆盖生成值，并对每个冲突键输出一条警告。        |
 | `platform`          | `"cloudflare" \| "edgeone"` | `"cloudflare"`         | OAuth 代理的部署平台。决定函数模板以及配置环境变量的后台。                                      |
 | `singletons`        | `unknown[]`                 | —                      | 单文件配置，转发为 `singletons`。                                                               |
@@ -326,12 +326,77 @@ export const collections = { posts: defineCollection({ loader: posts }) };
 
 **基于名称的查找** 会读取集成生成的 `config.json`（位于 Astro 的 `.astro/integrations/` 目录），相对于工作目录解析。请从站点根目录运行 Astro 并使用其默认的生成文件目录，或直接向 loader 传入集合对象。
 
+**支持的条目格式。** loader 现已支持 Sveltia CMS 可配置的全部条目存储格式——不再仅限 Markdown 文件夹集合：
+
+| 集合类型 | `format`                                | 默认扩展名 | 说明                                                        |
+| -------- | --------------------------------------- | ---------- | ----------------------------------------------------------- |
+| folder   | `frontmatter`（省略时的默认值）         | `md`       | 带 `---` / `+++` frontmatter 的 Markdown。                  |
+| folder   | `yaml-frontmatter` / `toml-frontmatter` | `md`       | 显式指定 frontmatter 分隔符的 Markdown。                    |
+| folder   | `yaml` / `yml`                          | `yml`      | 每条一个 YAML 文件。                                        |
+| folder   | `json`                                  | `json`     | 每条一个 JSON 文件。                                        |
+| folder   | `toml`                                  | `toml`     | 每条一个 TOML 文件。                                        |
+| file     | （任意）                                | —          | 单个 JSON 数组；每个元素为一条条目，ID = 0 起算的数组下标。 |
+
+无论何种格式，Zod schema 均由 CMS 的 `fields` 自动生成；`body` 字段仅在前置 frontmatter 类格式下排除。设置 `extension` 可覆盖推断的默认值（`extension` 优先于 `format`）。
+
+JSON folder 集合 —— 每条一个 `.json` 文件：
+
+```js
+sveltia({
+    /* ... */
+    collections: [
+        {
+            name: "notes",
+            label: "Notes",
+            folder: "src/content/notes",
+            format: "json",
+            fields: [
+                { name: "title", widget: "string" },
+                { name: "tags", widget: "list", required: false },
+            ],
+        },
+    ],
+});
+```
+
+```ts
+const notes = defineCollection({ loader: sveltiaLoader("notes") });
+```
+
+file 集合 —— 单个 JSON 数组存放全部条目：
+
+```js
+sveltia({
+    /* ... */
+    collections: [
+        {
+            name: "links",
+            label: "Links",
+            file: "src/data/links.json",
+            fields: [
+                { name: "label", widget: "string" },
+                { name: "url", widget: "string" },
+            ],
+        },
+    ],
+});
+```
+
+```ts
+// 每个数组元素成为一条条目，ID 为其 0 起算的下标。
+// file 集合不支持 locale 参数。
+const links = defineCollection({ loader: sveltiaLoader("links") });
+```
+
 **限制：**
 
-- 集合必须包含非空的 `folder` 和 `fields` 数组。不支持基于文件的集合与 `{{locale}}` 文件夹占位符。
-- 省略 `extension` 时，loader 对 YAML 使用 `yml`、JSON 使用 `json`、TOML 使用 `toml`、原始文件使用 `txt`，其余使用 `md`。Astro 必须为所选扩展名注册条目解析器；推断扩展名不会自动添加解析器。
+- 集合必须包含非空的 `folder` 或 `file`，以及 `fields` 数组。不支持 `files` 形式的集合（多个互不相关、各有一组字段的文件）、`{{locale}}` 文件夹占位符和顶层列表 / 键值存储（`root: true`）。
+- 不支持 `json-frontmatter` 格式：Astro 内置的 glob 解析器只识别 `---` 和 `+++` 分隔符，不识别 `{ }`。需要 JSON 数据请改用 `json` 的 folder 集合（每条一个 `.json` 文件），该路径完全可用。
+- file 集合（`file`）将每个数组元素作为一条条目加载，ID 为 0 起算的数组下标，与 Sveltia 按位置定义的 slug 一致。file 集合不支持 `locale` 参数（所有语言都存放在同一个 JSON 数组里），传入会报错。
+- `raw` 格式会报错：Astro 没有内置的纯文本解析器。如有需要，请先为对应扩展名注册自定义 content entry type。
+- 省略 `extension` 时，loader 对 YAML 使用 `yml`（`yml` 与 `yaml` 两种 format 取值等价）、JSON 使用 `json`、TOML 使用 `toml`，其余使用 `md`。Astro 必须为所选扩展名注册条目解析器；推断扩展名不会自动添加解析器。
 - 关联（relations）被转换为 Astro 引用，前提是存储值与目标条目 ID 匹配且 CMS 集合名称与 Astro 集合键匹配。不会解析自定义的 `value_field` 映射。
-- 不支持顶层列表 / 键值存储（`root: true`）。除 `multiple_folders` 之外的 i18n 结构均不支持。
+- 除 `multiple_folders` 之外的 i18n 结构均不支持。
 
 ## 使用指南
 

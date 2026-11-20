@@ -12,7 +12,7 @@ export const DEFAULT_BACKEND_NAME = "github";
  * drift. Previously `"latest"`, which pulled untested releases at build time
  * and was not reproducible.
  */
-export const DEFAULT_SVELTIA_VERSION = "0.256.1";
+export const DEFAULT_SVELTIA_VERSION = "0.270.0";
 
 /**
  * Maps first-class integration options to their canonical Sveltia config keys.

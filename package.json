@@ -1,6 +1,6 @@
 {
     "name": "astro-sveltia-pages",
-    "version": "0.4.9",
+    "version": "0.5.0",
     "description": "Generates /admin (index.html + config.yml) for Sveltia CMS, with Cloudflare R2 media support and a GitHub OAuth template for Cloudflare Pages and EdgeOne Pages.",
     "keywords": [
         "astro-integration",
@@ -57,20 +57,20 @@
         "prepare": "vp config"
     },
     "dependencies": {
-        "@sveltia/cms": "^0.256.1",
-        "js-yaml": "^4.1.0",
-        "zod-to-ts": "^2.0.0"
+        "@sveltia/cms": "0.270.0",
+        "js-yaml": "^4.3.2",
+        "zod-to-ts": "^2.1.0"
     },
     "devDependencies": {
         "@types/js-yaml": "^4.0.9",
-        "@types/node": "^25.6.2",
+        "@types/node": "^26.6.6",
         "@typescript/native-preview": "7.0.0-dev.20260509.2",
-        "astro": "^7.3.8",
+        "astro": "^7.4.13",
         "bumpp": "^11.1.0",
         "typescript": "^6.0.3",
         "vite": "catalog:",
         "vite-plus": "catalog:",
-        "vitest": "^4.1.1"
+        "vitest": "^4.1.12"
     },
     "peerDependencies": {
         "astro": "^7.0.0"

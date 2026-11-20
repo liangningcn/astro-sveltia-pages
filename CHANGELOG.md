@@ -10,6 +10,75 @@ section below.
 
 ---
 
+## 0.5.0
+
+### Added
+
+- **Multi-format content loader.** `sveltiaLoader` now supports every entry
+  storage format Sveltia CMS can configure, not just Markdown folders:
+    - folder collections with plain data files — `json`, `yaml`/`yml`, `toml`
+      (one file per entry);
+    - folder collections with frontmatter Markdown — `frontmatter` (the
+      default), `yaml-frontmatter`, `toml-frontmatter`;
+    - file collections (`file`) — a single JSON array holding all entries,
+      loaded as entries whose ID is the 0-based array index (matching Sveltia's
+      position-based slugs).
+      The Zod schema is still generated from the CMS `fields` regardless of
+      format; the `body` field is excluded only for frontmatter formats, as
+      before. Existing Markdown folder collections behave exactly as before —
+      zero change for current users.
+- `resolveFormat()` normalizes the `yml` format alias (`yml` and `yaml` are
+  the same format) and infers the format from the extension when it is
+  omitted, matching Sveltia's own semantics.
+
+### Changed
+
+- **`@sveltia/cms` pinned to `0.270.0`** (was `^0.256.1`), and
+  `DEFAULT_SVELTIA_VERSION` raised from `0.256.1` to `0.270.0`. The CMS UI
+  loaded from unpkg now matches the `@sveltia/cms` type definitions used at
+  build time, removing the previous type/runtime drift.
+- Same-major dependency bumps that stay within each package's current major:
+  `astro` `^7.4.13`, `vitest` `^4.1.12`, `js-yaml` `^4.3.2`,
+  `zod-to-ts` `^2.1.0`, `@types/node` `^26.6.6`. `typescript` 6.0.3 is
+  already the latest 6.x; `bumpp` and `@typescript/native-preview` are
+  unchanged (higher-major / preview risk).
+- `SveltiaCollection` now accepts `folder` **or** `file` (plus `fields`);
+  the integration's startup validation no longer rejects file-backed entry
+  collections. The `glob()` loader is reused for folder collections and
+  Astro's built-in `file()` loader is reused (with a parser that keys the
+  array by index) for file collections, so no parsing logic is duplicated.
+- The i18n template version is bumped to **0.5.0** so site repositories get
+  an unambiguous upgrade signal, even though no i18n template content
+  changed in this release.
+
+### Limitations (documented in both READMEs)
+
+- `json-frontmatter` is **not** supported: Astro's built-in glob parser only
+  recognizes `---` and `+++` delimiters, not `{ }`. Use a `json` folder
+  collection (one `.json` file per entry) instead — that path is fully
+  supported.
+- The `raw` format throws: Astro has no built-in parser for raw text files.
+  Register a custom content entry type for the extension first if you need it.
+- The `locale` option is not supported for file collections (all locales live
+  in the same JSON array) and throws when passed.
+- `files`-style collections (a list of unrelated files, each with its own
+  fields), `{{locale}}` folder placeholders, and top-level list/key-value
+  storage (`root: true`) remain rejected.
+
+### Migration
+
+- **No CMS config, frontmatter or secret changes are required.** Existing
+  Markdown folder collections continue to work unchanged — this release is
+  additive.
+- To use a new format, set `format` (and optionally `extension`) on the
+  collection, or point it at `file` for a single JSON array. See the
+  "Content Loader" section of either README for a format table and examples.
+- After upgrading, re-run `pnpm exec astro-sveltia-pages init:i18n` in every
+  site repository and commit the three regenerated snapshots; the template
+  version stamp moves to `0.5.0`, so `init:i18n --check` gates stale templates
+  in CI. The template content itself is unchanged — this is the standard
+  post-upgrade step, not a workflow migration.
+
 ## 0.4.9
 
 ### Changed

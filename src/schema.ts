@@ -1,5 +1,6 @@
 import type {
     CodeField,
+    EntryCollection,
     Field,
     FileField,
     HiddenField,
@@ -41,6 +42,49 @@ export const frontmatterFormats = new Set([
     "json-frontmatter",
     undefined,
 ]);
+
+function fileExtension(path: string): string {
+    const idx = path.lastIndexOf(".");
+    return idx === -1 ? "" : path.slice(idx + 1).toLowerCase();
+}
+
+/**
+ * Normalizes a collection's storage format, mirroring Sveltia's own
+ * detection rules:
+ *
+ * - An explicit `format` wins; `"yml"` is normalized to `"yaml"`.
+ * - File collections without a format default to the JSON array storage
+ *   (YAML/TOML are honored when the file name says so).
+ * - Folder collections without a format infer it from the extension:
+ *   data extensions (`json`/`yaml`/`yml`/`toml`) mean the body is a regular
+ *   field; anything else — including the default Markdown — is frontmatter.
+ */
+export function resolveFormat(collection: EntryCollection): string {
+    if (collection.format) {
+        return collection.format === "yml" ? "yaml" : collection.format;
+    }
+    if (collection.file) {
+        const ext = fileExtension(collection.file);
+        if (ext === "yaml" || ext === "yml") {
+            return "yaml";
+        }
+        if (ext === "toml") {
+            return "toml";
+        }
+        return "json";
+    }
+    const ext = collection.extension;
+    if (ext === "json") {
+        return "json";
+    }
+    if (ext === "yaml" || ext === "yml") {
+        return "yaml";
+    }
+    if (ext === "toml") {
+        return "toml";
+    }
+    return "frontmatter";
+}
 
 export function getWidget(field: Field): string {
     return "widget" in field && field.widget ? field.widget : "string";

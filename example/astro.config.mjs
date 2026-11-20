@@ -15,7 +15,7 @@ export default defineConfig({
             mediaFolder: "public/images",
             publicFolder: "/images",
             appTitle: "My CMS",
-            // sveltiaVersion defaults to the pinned 0.256.1; override only if needed.
+            // sveltiaVersion defaults to the pinned 0.270.0; override only if needed.
 
             // Optional: Cloudflare R2 external media library.
             // The secret access key is entered in the CMS UI on first use,

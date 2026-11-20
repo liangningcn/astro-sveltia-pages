@@ -62,7 +62,22 @@ describe("resolveCollection", () => {
         );
     });
 
-    it("throws for a file-based collection (has name but no folder/fields)", () => {
+    it("returns a file-backed entry collection by name", () => {
+        const fileConfig: CmsConfig = {
+            backend: { name: "test-repo" },
+            collections: [
+                {
+                    name: "nav",
+                    file: "src/data/nav.json",
+                    fields: [{ name: "title", widget: "string" }],
+                },
+            ],
+        };
+        const result = resolveCollection(fileConfig, "nav");
+        expect(result.name).toBe("nav");
+    });
+
+    it("throws for a files-style collection (has name but no folder/file/fields)", () => {
         const fileConfig: CmsConfig = {
             backend: { name: "test-repo" },
             collections: [
@@ -73,7 +88,7 @@ describe("resolveCollection", () => {
             ],
         };
         expect(() => resolveCollection(fileConfig, "settings")).toThrowError(
-            /not a folder-based entry collection/,
+            /not a supported entry collection/,
         );
     });
 });
@@ -179,6 +194,70 @@ describe("sveltiaLoader — object form", () => {
         const s = schema as unknown as { shape: Record<string, unknown> };
         expect(s.shape).toHaveProperty("body");
         expect(s.shape).toHaveProperty("name");
+    });
+
+    it("createSchema() includes body for the yml format alias", async () => {
+        const col: EntryCollection = {
+            name: "data",
+            folder: "src/data",
+            format: "yml",
+            fields: [
+                { name: "name", widget: "string" },
+                { name: "body", widget: "markdown" },
+            ],
+        };
+        const loader = sveltiaLoader(col);
+        const { schema } = await loader.createSchema!();
+        const s = schema as unknown as { shape: Record<string, unknown> };
+        expect(s.shape).toHaveProperty("body");
+    });
+
+    it("createSchema() includes body when a data extension is set without a format", async () => {
+        const col: EntryCollection = {
+            name: "data",
+            folder: "src/data",
+            extension: "json",
+            fields: [
+                { name: "name", widget: "string" },
+                { name: "body", widget: "markdown" },
+            ],
+        };
+        const loader = sveltiaLoader(col);
+        const { schema } = await loader.createSchema!();
+        const s = schema as unknown as { shape: Record<string, unknown> };
+        expect(s.shape).toHaveProperty("body");
+    });
+
+    it("createSchema() keeps body for a file collection (JSON array storage)", async () => {
+        const col: EntryCollection = {
+            name: "nav",
+            file: "src/data/nav.json",
+            fields: [
+                { name: "title", widget: "string" },
+                { name: "body", widget: "markdown" },
+            ],
+        };
+        const loader = sveltiaLoader(col);
+        const { schema } = await loader.createSchema!();
+        const s = schema as unknown as { shape: Record<string, unknown> };
+        expect(s.shape).toHaveProperty("body");
+        expect(s.shape).toHaveProperty("title");
+    });
+
+    it("createSchema() still excludes body for a plain Markdown folder collection", async () => {
+        const col: EntryCollection = {
+            name: "posts",
+            folder: "src/content/posts",
+            fields: [
+                { name: "title", widget: "string" },
+                { name: "body", widget: "markdown" },
+            ],
+        };
+        const loader = sveltiaLoader(col);
+        const { schema } = await loader.createSchema!();
+        const s = schema as unknown as { shape: Record<string, unknown> };
+        expect(s.shape).not.toHaveProperty("body");
+        expect(s.shape).toHaveProperty("title");
     });
 
     it("uses default extension 'md' when extension is not specified", () => {

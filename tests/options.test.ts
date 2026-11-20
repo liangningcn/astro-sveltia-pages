@@ -26,13 +26,24 @@ describe("validateOptions — collections", () => {
         );
     });
 
-    it("rejects a collection without folder", () => {
+    it("rejects a collection without folder or file", () => {
         expect(() =>
             validateOptions({
                 ...validOptions,
                 collections: [{ name: "posts", fields: [] } as never],
             }),
-        ).toThrow(/\[astro-sveltia-pages\].*collections\[0\]\.folder/);
+        ).toThrow(/\[astro-sveltia-pages\].*collections\[0\]\.folder or file/);
+    });
+
+    it("accepts a file collection (file instead of folder)", () => {
+        expect(() =>
+            validateOptions({
+                ...validOptions,
+                collections: [
+                    { name: "links", file: "src/data/links.json", fields: [] } as never,
+                ],
+            }),
+        ).not.toThrow();
     });
 
     it("rejects a collection without a fields array", () => {

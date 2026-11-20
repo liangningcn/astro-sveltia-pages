@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import type { CmsConfig, EntryCollection } from "@sveltia/cms";
 
-import { isEntryCollection } from "./config.js";
+import { isSupportedCollection } from "./config.js";
 
 /** Persist the CMS config for the content loader's name-based lookup. */
 export function writeConfigToDisk(
@@ -20,7 +20,7 @@ export function writeConfigToDisk(
 
 function getCollectionNames(config: CmsConfig): string[] {
     return (config.collections ?? [])
-        .filter(isEntryCollection)
+        .filter(isSupportedCollection)
         .map((collection) => collection.name);
 }
 

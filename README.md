@@ -127,7 +127,7 @@ All configuration lives in the `sveltia({ ... })` options object. The integratio
 | `appTitle`          | `string`                    | `"Sveltia CMS"`       | Browser tab / login page title.                                                                                                      |
 | `logo`              | `{ src, ... }`              | —                     | CMS logo, forwarded as `logo`.                                                                                                       |
 | `backendName`       | `string`                    | `"github"`            | Git backend name.                                                                                                                    |
-| `sveltiaVersion`    | `string`                    | `"0.256.1"`           | Sveltia version loaded from unpkg, **pinned** for reproducibility (previously `"latest"`). Override only to upgrade deliberately.    |
+| `sveltiaVersion`    | `string`                    | `"0.270.0"`           | Sveltia version loaded from unpkg, **pinned** for reproducibility (previously `"latest"`). Override only to upgrade deliberately.    |
 | `extraConfig`       | `object`                    | —                     | Escape hatch, shallowly merged into the generated config. Colliding keys override the generated value and emit one warning per key.  |
 | `platform`          | `"cloudflare" \| "edgeone"` | `"cloudflare"`        | Deployment platform of the OAuth proxy. Selects the function template and the dashboard the environment variables are configured in. |
 | `singletons`        | `unknown[]`                 | —                     | Singleton files, forwarded as `singletons`.                                                                                          |
@@ -331,12 +331,77 @@ export const collections = { posts: defineCollection({ loader: posts }) };
 
 **Name-based lookup** reads the integration's generated `config.json` (inside Astro's `.astro/integrations/` directory) relative to the working directory. Run Astro from the site root with its default generated-files directory, or pass a collection object directly to the loader.
 
+**Supported entry formats.** The loader supports every entry storage format Sveltia CMS can configure — not just Markdown folders:
+
+| Collection type | `format`                                | Default extension | Notes                                                                  |
+| --------------- | --------------------------------------- | ----------------- | ---------------------------------------------------------------------- |
+| folder          | `frontmatter` (default when omitted)    | `md`              | Markdown with `---` / `+++` frontmatter.                               |
+| folder          | `yaml-frontmatter` / `toml-frontmatter` | `md`              | Markdown with an explicit frontmatter delimiter.                       |
+| folder          | `yaml` / `yml`                          | `yml`             | One YAML file per entry.                                               |
+| folder          | `json`                                  | `json`            | One JSON file per entry.                                               |
+| folder          | `toml`                                  | `toml`            | One TOML file per entry.                                               |
+| file            | (any)                                   | —                 | A single JSON array; each item is one entry, ID = 0-based array index. |
+
+The Zod schema is generated from the CMS `fields` either way; the `body` field is excluded only for frontmatter formats. Set `extension` to override the inferred default (it takes precedence over `format`).
+
+A JSON folder collection — one `.json` file per entry:
+
+```js
+sveltia({
+    /* ... */
+    collections: [
+        {
+            name: "notes",
+            label: "Notes",
+            folder: "src/content/notes",
+            format: "json",
+            fields: [
+                { name: "title", widget: "string" },
+                { name: "tags", widget: "list", required: false },
+            ],
+        },
+    ],
+});
+```
+
+```ts
+const notes = defineCollection({ loader: sveltiaLoader("notes") });
+```
+
+A file collection — a single JSON array holding all entries:
+
+```js
+sveltia({
+    /* ... */
+    collections: [
+        {
+            name: "links",
+            label: "Links",
+            file: "src/data/links.json",
+            fields: [
+                { name: "label", widget: "string" },
+                { name: "url", widget: "string" },
+            ],
+        },
+    ],
+});
+```
+
+```ts
+// Each array item becomes an entry whose ID is its 0-based index.
+// The `locale` option is not supported for file collections.
+const links = defineCollection({ loader: sveltiaLoader("links") });
+```
+
 **Limitations:**
 
-- Collections must have a non-empty `folder` and a `fields` array. File-backed collections and `{{locale}}` folder placeholders are rejected.
-- When `extension` is omitted, the loader uses `yml` for YAML, `json` for JSON, `toml` for TOML, `txt` for raw files, and `md` otherwise. Astro must have an entry parser registered for the selected extension; inferring an extension does not add a parser.
+- Collections must have a non-empty `folder` or `file` plus a `fields` array. `files`-style collections (a list of unrelated files, each with its own fields), `{{locale}}` folder placeholders, and top-level list/key-value storage (`root: true`) are rejected.
+- The `json-frontmatter` format is not supported: Astro's built-in glob parser only recognizes `---` and `+++` delimiters, not `{ }`. If you need JSON data, use a `json` folder collection (one `.json` file per entry) — that path is fully supported.
+- File collections load each array item as an entry whose ID is the 0-based array index, matching Sveltia's position-based slugs. The `locale` option is not supported for file collections (all locales live in the same JSON array) and throws when passed.
+- The `raw` format throws: Astro has no built-in parser for raw text files. Register a custom content entry type for the extension first if you need it.
+- When `extension` is omitted, the loader uses `yml` for YAML (the `yml` and `yaml` format values are the same), `json` for JSON, `toml` for TOML, and `md` otherwise. Astro must have an entry parser registered for the selected extension; inferring an extension does not add a parser.
 - Relations are converted to Astro references assuming the stored value matches the target entry ID and the CMS collection name matches the Astro collection key. Custom `value_field` mappings are not resolved.
-- Top-level list/key-value storage (`root: true`) is not supported. i18n structures other than `multiple_folders` are not supported.
+- i18n structures other than `multiple_folders` are not supported.
 
 ## Guides
 

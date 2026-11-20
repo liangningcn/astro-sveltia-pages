@@ -8,7 +8,7 @@ import {
     zodToTs,
 } from "zod-to-ts";
 
-import { frontmatterFormats, sveltiaSchema } from "./schema.js";
+import { frontmatterFormats, resolveFormat, sveltiaSchema } from "./schema.js";
 import type { SchemaContext } from "./schema.js";
 
 type TypeOverrideFunction = TypeOverrideMap extends Map<unknown, infer V> ? V : never;
@@ -43,7 +43,7 @@ export async function buildCollectionSchema(
 ): Promise<{ schema: z.ZodType; types: string }> {
     const ctx: SchemaContext = { imageSchemas: [], relationSchemas: new Map() };
     const schema = sveltiaSchema(collection.fields, {
-        excludeBody: frontmatterFormats.has(collection.format),
+        excludeBody: frontmatterFormats.has(resolveFormat(collection)),
         ctx,
     });
 
