@@ -10,6 +10,7 @@ import {
     resolveCollection,
 } from "./config.js";
 import type { FileBackedCollection, FolderCollection } from "./config.js";
+import { loadRawCollection } from "./raw-loader.js";
 import { frontmatterFormats, resolveFormat } from "./schema.js";
 import { transformFieldValues } from "./transforms.js";
 import { buildCollectionSchema } from "./type-gen.js";
@@ -203,16 +204,23 @@ export function sveltiaLoader(
                         `"${collection.name}" uses "file", which stores all locales in one JSON array.`,
                 );
             }
+            if (resolveFormat(collection) === "raw") {
+                throw new Error(
+                    `[sveltiaLoader] The "raw" format is not supported for file collections: ` +
+                        `"${collection.name}" uses "file", which stores a JSON array. ` +
+                        `The "raw" format applies to folder collections only.`,
+                );
+            }
         } else if (collection.folder.includes("{{locale}}")) {
             throw new Error(
                 `[sveltiaLoader] Collection "${collection.name}" uses a {{locale}} folder placeholder, which is not supported.`,
             );
         }
-        if (resolveFormat(collection) === "raw") {
+        if (resolveFormat(collection) === "json-frontmatter") {
             throw new Error(
-                `[sveltiaLoader] Collection "${collection.name}" uses the "raw" format, which is not supported: ` +
-                    `Astro has no built-in parser for raw text files. Use another format, or register a ` +
-                    `custom content entry type for the file extension first.`,
+                `[sveltiaLoader] Collection "${collection.name}" uses the "json-frontmatter" format, which is not supported: ` +
+                    `Astro's built-in parser only recognizes "---" and "+++" delimiters, not "{ }". ` +
+                    `Use a "json" folder collection (one .json file per entry) instead.`,
             );
         }
         return { collection, config };
@@ -233,6 +241,16 @@ export function sveltiaLoader(
             const { collection, config } = getCollection();
             if (isFileBackedCollection(collection)) {
                 return loadFileCollection(collection, context);
+            }
+            if (resolveFormat(collection) === "raw") {
+                const base = resolveBaseFolder(collection, config, options?.locale);
+                const extension = collection.extension ?? defaultExtension("raw");
+                return loadRawCollection(
+                    collection,
+                    base,
+                    extension,
+                    wrapContextWithTransforms(context, collection),
+                );
             }
             return loadFolderCollection(collection, config, context, options?.locale);
         },

@@ -128,7 +128,9 @@ export type SveltiaPagesOptions = {
     slug?: Record<string, unknown>;
     /**
      * Absolute URL or path to the logo shown on the entrance page and as the
-     * favicon. Maps to the Sveltia `logo_url` config key.
+     * favicon. Forwarded as `logo: { src }` — Sveltia's `logo_url` key is
+     * deprecated (superseded by `logo.src`). Prefer the `logo` option for
+     * extra options such as `header`.
      */
     logoUrl?: string;
     /**
@@ -222,6 +224,13 @@ export function validateOptions(options: SveltiaPagesOptions): void {
 
     if (options.logo && !isNonEmptyString(options.logo.src)) {
         fail('"logo.src" must be a non-empty string.');
+    }
+
+    if (options.logo && options.logoUrl !== undefined) {
+        fail(
+            '"logo" and "logoUrl" are mutually exclusive: both control the site logo. ' +
+                'Pass "logo: { src, ... }" (recommended) or "logoUrl" alone.',
+        );
     }
 
     if (options.backendName !== undefined && !isNonEmptyString(options.backendName)) {

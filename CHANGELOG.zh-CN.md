@@ -8,6 +8,24 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.6.0
+
+### 新增
+
+- **`raw` 格式现已支持** folder 集合。Sveltia 的 `raw` 格式把每条条目存为一个完整的纯文本文件（`.astro`、`.txt`、`.json`、`.xml`、`.csv` 等），无 frontmatter；整个文件内容加载到唯一的 `body` 字段。专用 loader 以 UTF-8 读取这些文件，并通过常规的 `parseData` 链路注入 `{ body: content }`，因此字段变换与 Zod schema 照常生效。它与其他 folder 集合一样支持嵌套目录、扩展名过滤、基于 digest 的变更检测、dev 服务器热更新、删除清理，以及 i18n `multiple_folders` 多语言。`raw` 的默认扩展名为 `txt`（可用 `extension` 覆盖）。file 集合上使用 `raw` 会被拒绝，因为 file 集合存放的是 JSON 数组而非纯文本。
+- `logoUrl` 现转发为 `logo: { src }`：Sveltia 已废弃顶层 `logo_url` 配置键（由 `logo.src` 取代）。公开选项名不变；同时设置 `logo` 与 `logoUrl` 现在会因互斥而报错。
+
+### 变更
+
+- `json-frontmatter` 格式现在会快速报错，并给出明确指引——建议改用 `json` folder 集合（此前该格式会走到解析器才失败，提示不够友好）。该格式仍不受支持——Astro 内置 glob 解析器只识别 `---` 与 `+++`，不识别 `{ }`。
+- 补充文档说明升级 `sveltiaVersion` 时需留意的 Sveltia 行为变化：自 Sveltia v0.105.0 起 `sanitize_preview` 默认为 `true`，集合级 `slug_length` 已废弃、改用全局 `slug: { maxlength }`。
+- i18n 模板版本按项目惯例升至 **0.6.0**，与包版本保持一致，为下游站点仓库提供明确的升级信号（本次未改动 i18n 模板内容）。
+
+### 迁移
+
+- **无破坏性变更。** 现有集合继续按原样工作。要使用 `raw`，在 folder 集合上设置 `format: "raw"`（可用 `extension` 指定文本文件后缀），并按 Sveltia 对 `raw` 的要求在该集合的 `fields` 里只定义一个 `body` 字段。
+- 升级后**必须在每个站点仓库重跑 `pnpm exec astro-sveltia-pages init:i18n`** 并提交三份重新生成的快照；模板版本戳升至 `0.6.0`，CI 可用 `init:i18n --check` 拦截过期模板。
+
 ## 0.5.0
 
 ### 新增

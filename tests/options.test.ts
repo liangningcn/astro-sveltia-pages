@@ -111,6 +111,25 @@ describe("validateOptions — scalars", () => {
         );
     });
 
+    it("rejects logo and logoUrl set together (both control the site logo)", () => {
+        expect(() =>
+            validateOptions({
+                ...validOptions,
+                logo: { src: "/logo.svg" },
+                logoUrl: "https://example.com/logo.svg",
+            }),
+        ).toThrow(/\[astro-sveltia-pages\].*"logo" and "logoUrl".*mutually exclusive/);
+    });
+
+    it("accepts logoUrl alone (forwarded as logo.src)", () => {
+        expect(() =>
+            validateOptions({
+                ...validOptions,
+                logoUrl: "https://example.com/logo.svg",
+            }),
+        ).not.toThrow();
+    });
+
     it("accepts a fully populated options object", () => {
         expect(() =>
             validateOptions({

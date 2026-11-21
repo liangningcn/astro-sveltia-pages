@@ -115,40 +115,45 @@ All configuration lives in the `sveltia({ ... })` options object. The integratio
 
 ### Options reference
 
-| Option              | Type                        | Default               | Description                                                                                                                          |
-| ------------------- | --------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `repo`              | `string`                    | —                     | GitHub repository, `owner/name`. Required.                                                                                           |
-| `branch`            | `string`                    | `"main"`              | Branch CMS changes are committed to.                                                                                                 |
-| `siteUrl`           | `string`                    | Astro `site`          | Origin used as CMS `base_url`. Build fails when neither is set.                                                                      |
-| `collections`       | `SveltiaCollection[]`       | —                     | Mapped 1:1 into the CMS config. Required.                                                                                            |
-| `r2`                | `object`                    | —                     | Cloudflare R2 external media library (see [Media Storage](#cloudflare-r2-media-storage)).                                            |
-| `mediaFolder`       | `string`                    | `"public/images"`     | CMS `media_folder`.                                                                                                                  |
-| `publicFolder`      | `string`                    | `"/images"`           | CMS `public_folder`.                                                                                                                 |
-| `appTitle`          | `string`                    | `"Sveltia CMS"`       | Browser tab / login page title.                                                                                                      |
-| `logo`              | `{ src, ... }`              | —                     | CMS logo, forwarded as `logo`.                                                                                                       |
-| `backendName`       | `string`                    | `"github"`            | Git backend name.                                                                                                                    |
-| `sveltiaVersion`    | `string`                    | `"0.270.0"`           | Sveltia version loaded from unpkg, **pinned** for reproducibility (previously `"latest"`). Override only to upgrade deliberately.    |
-| `extraConfig`       | `object`                    | —                     | Escape hatch, shallowly merged into the generated config. Colliding keys override the generated value and emit one warning per key.  |
-| `platform`          | `"cloudflare" \| "edgeone"` | `"cloudflare"`        | Deployment platform of the OAuth proxy. Selects the function template and the dashboard the environment variables are configured in. |
-| `singletons`        | `unknown[]`                 | —                     | Singleton files, forwarded as `singletons`.                                                                                          |
-| `assetCollections`  | `unknown[]`                 | —                     | Asset collections, forwarded as `asset_collections`.                                                                                 |
-| `i18n`              | `object`                    | —                     | Global i18n options, forwarded as `i18n`.                                                                                            |
-| `readonly`          | `boolean`                   | `false`               | Make the whole CMS read-only, forwarded as `readonly`.                                                                               |
-| `showPreviewLinks`  | `boolean`                   | — (Sveltia: `true`)   | Show live/deploy-preview links; forwarded as `show_preview_links` **only when set**.                                                 |
-| `displayUrl`        | `string`                    | —                     | URL linked from the UI, forwarded as `display_url`.                                                                                  |
-| `logoutRedirectUrl` | `string`                    | —                     | Post-logout redirect URL, forwarded as `logout_redirect_url`.                                                                        |
-| `editor`            | `object`                    | —                     | Editor view options, forwarded as `editor`.                                                                                          |
-| `publishMode`       | `string \| object`          | — (Sveltia: `simple`) | Publish mode, forwarded as `publish_mode` **only when set**.                                                                         |
-| `fieldDefaults`     | `object`                    | —                     | Default field options, forwarded as `field_defaults`.                                                                                |
-| `output`            | `object`                    | —                     | Data output options, forwarded as `output`.                                                                                          |
-| `slug`              | `object`                    | —                     | Slug options for entries and assets, forwarded as `slug`.                                                                            |
-| `logoUrl`           | `string`                    | —                     | Entrance page / favicon logo URL, forwarded as `logo_url`.                                                                           |
+| Option              | Type                        | Default               | Description                                                                                                                                     |
+| ------------------- | --------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo`              | `string`                    | —                     | GitHub repository, `owner/name`. Required.                                                                                                      |
+| `branch`            | `string`                    | `"main"`              | Branch CMS changes are committed to.                                                                                                            |
+| `siteUrl`           | `string`                    | Astro `site`          | Origin used as CMS `base_url`. Build fails when neither is set.                                                                                 |
+| `collections`       | `SveltiaCollection[]`       | —                     | Mapped 1:1 into the CMS config. Required.                                                                                                       |
+| `r2`                | `object`                    | —                     | Cloudflare R2 external media library (see [Media Storage](#cloudflare-r2-media-storage)).                                                       |
+| `mediaFolder`       | `string`                    | `"public/images"`     | CMS `media_folder`.                                                                                                                             |
+| `publicFolder`      | `string`                    | `"/images"`           | CMS `public_folder`.                                                                                                                            |
+| `appTitle`          | `string`                    | `"Sveltia CMS"`       | Browser tab / login page title.                                                                                                                 |
+| `logo`              | `{ src, ... }`              | —                     | CMS logo, forwarded as `logo`.                                                                                                                  |
+| `backendName`       | `string`                    | `"github"`            | Git backend name.                                                                                                                               |
+| `sveltiaVersion`    | `string`                    | `"0.270.0"`           | Sveltia version loaded from unpkg, **pinned** for reproducibility (previously `"latest"`). Override only to upgrade deliberately.               |
+| `extraConfig`       | `object`                    | —                     | Escape hatch, shallowly merged into the generated config. Colliding keys override the generated value and emit one warning per key.             |
+| `platform`          | `"cloudflare" \| "edgeone"` | `"cloudflare"`        | Deployment platform of the OAuth proxy. Selects the function template and the dashboard the environment variables are configured in.            |
+| `singletons`        | `unknown[]`                 | —                     | Singleton files, forwarded as `singletons`.                                                                                                     |
+| `assetCollections`  | `unknown[]`                 | —                     | Asset collections, forwarded as `asset_collections`.                                                                                            |
+| `i18n`              | `object`                    | —                     | Global i18n options, forwarded as `i18n`.                                                                                                       |
+| `readonly`          | `boolean`                   | `false`               | Make the whole CMS read-only, forwarded as `readonly`.                                                                                          |
+| `showPreviewLinks`  | `boolean`                   | — (Sveltia: `true`)   | Show live/deploy-preview links; forwarded as `show_preview_links` **only when set**.                                                            |
+| `displayUrl`        | `string`                    | —                     | URL linked from the UI, forwarded as `display_url`.                                                                                             |
+| `logoutRedirectUrl` | `string`                    | —                     | Post-logout redirect URL, forwarded as `logout_redirect_url`.                                                                                   |
+| `editor`            | `object`                    | —                     | Editor view options, forwarded as `editor`.                                                                                                     |
+| `publishMode`       | `string \| object`          | — (Sveltia: `simple`) | Publish mode, forwarded as `publish_mode` **only when set**.                                                                                    |
+| `fieldDefaults`     | `object`                    | —                     | Default field options, forwarded as `field_defaults`.                                                                                           |
+| `output`            | `object`                    | —                     | Data output options, forwarded as `output`.                                                                                                     |
+| `slug`              | `object`                    | —                     | Slug options for entries and assets, forwarded as `slug`. Sveltia deprecated collection-level `slug_length`; use `slug: { maxlength }` instead. |
+| `logoUrl`           | `string`                    | —                     | Entrance page / favicon logo URL, forwarded as `logo: { src }` — Sveltia deprecated the `logo_url` key; the option name is unchanged.           |
 
 `collections` entries require `name`, `folder` and `fields`; every other Sveltia collection option (`create`, collection-level `slug`, `i18n`, `media_folder`, …) is passed through unchanged.
 
 **Promoted options.** The 13 options below the `platform` row were previously only reachable through `extraConfig`. They are now first-class, type-checked, and forwarded to their matching Sveltia config key. Each is emitted **only when you set it** — the integration never overrides Sveltia's own defaults — so `—` in the Default column means "not emitted; Sveltia's default applies". `extraConfig` still works and can override any of them (with one warning per colliding key).
 
 **Removed in 0.3.1:** the integration `locale` option was dropped. Sveltia has no `locale` config key (the value was silently ignored), and the CMS UI language follows the browser. The `locale` parameter on the **loader** — `sveltiaLoader(name, { locale })` — is unrelated and remains.
+
+**Sveltia behavior changes to know about** (not controlled by this package; relevant when bumping `sveltiaVersion`):
+
+- Since Sveltia v0.105.0 the Markdown widget's preview sanitization (`sanitize_preview`) defaults to `true` to defend against XSS. If you relied on rendering raw HTML in previews, set `sanitize_preview: false` on the field.
+- Sveltia deprecated collection-level `slug_length` (use the global `slug: { maxlength }`) and the top-level `logo_url` key (use `logo: { src }` — the `logoUrl` option here is already forwarded to the new key).
 
 ### Authentication (GitHub OAuth)
 
@@ -333,14 +338,15 @@ export const collections = { posts: defineCollection({ loader: posts }) };
 
 **Supported entry formats.** The loader supports every entry storage format Sveltia CMS can configure — not just Markdown folders:
 
-| Collection type | `format`                                | Default extension | Notes                                                                  |
-| --------------- | --------------------------------------- | ----------------- | ---------------------------------------------------------------------- |
-| folder          | `frontmatter` (default when omitted)    | `md`              | Markdown with `---` / `+++` frontmatter.                               |
-| folder          | `yaml-frontmatter` / `toml-frontmatter` | `md`              | Markdown with an explicit frontmatter delimiter.                       |
-| folder          | `yaml` / `yml`                          | `yml`             | One YAML file per entry.                                               |
-| folder          | `json`                                  | `json`            | One JSON file per entry.                                               |
-| folder          | `toml`                                  | `toml`            | One TOML file per entry.                                               |
-| file            | (any)                                   | —                 | A single JSON array; each item is one entry, ID = 0-based array index. |
+| Collection type | `format`                                | Default extension | Notes                                                                   |
+| --------------- | --------------------------------------- | ----------------- | ----------------------------------------------------------------------- |
+| folder          | `frontmatter` (default when omitted)    | `md`              | Markdown with `---` / `+++` frontmatter.                                |
+| folder          | `yaml-frontmatter` / `toml-frontmatter` | `md`              | Markdown with an explicit frontmatter delimiter.                        |
+| folder          | `yaml` / `yml`                          | `yml`             | One YAML file per entry.                                                |
+| folder          | `json`                                  | `json`            | One JSON file per entry.                                                |
+| folder          | `toml`                                  | `toml`            | One TOML file per entry.                                                |
+| folder          | `raw`                                   | `txt`             | One whole plain-text file per entry, loaded into a single `body` field. |
+| file            | (any, except `raw`)                     | —                 | A single JSON array; each item is one entry, ID = 0-based array index.  |
 
 The Zod schema is generated from the CMS `fields` either way; the `body` field is excluded only for frontmatter formats. Set `extension` to override the inferred default (it takes precedence over `format`).
 
@@ -393,12 +399,38 @@ sveltia({
 const links = defineCollection({ loader: sveltiaLoader("links") });
 ```
 
+A `raw` folder collection — one whole plain-text file per entry (e.g. an
+`.astro` snippet or a `.json` config file edited as text). Define a single
+`body` field, as Sveltia requires for `raw`:
+
+```js
+sveltia({
+    /* ... */
+    collections: [
+        {
+            name: "snippets",
+            label: "Snippets",
+            folder: "src/snippets",
+            format: "raw",
+            extension: "astro",
+            fields: [{ name: "body", widget: "code" }],
+        },
+    ],
+});
+```
+
+```ts
+// Each file's full text is available as entry.data.body; the entry ID is the
+// file path relative to the folder, without the extension.
+const snippets = defineCollection({ loader: sveltiaLoader("snippets") });
+```
+
 **Limitations:**
 
 - Collections must have a non-empty `folder` or `file` plus a `fields` array. `files`-style collections (a list of unrelated files, each with its own fields), `{{locale}}` folder placeholders, and top-level list/key-value storage (`root: true`) are rejected.
 - The `json-frontmatter` format is not supported: Astro's built-in glob parser only recognizes `---` and `+++` delimiters, not `{ }`. If you need JSON data, use a `json` folder collection (one `.json` file per entry) — that path is fully supported.
 - File collections load each array item as an entry whose ID is the 0-based array index, matching Sveltia's position-based slugs. The `locale` option is not supported for file collections (all locales live in the same JSON array) and throws when passed.
-- The `raw` format throws: Astro has no built-in parser for raw text files. Register a custom content entry type for the extension first if you need it.
+- The `raw` format is supported for folder collections only: each file's full text becomes the single `body` field (default extension `txt`, override with `extension`). It requires a collection with a single `body` field, as Sveltia defines for `raw`. `raw` on a file collection is rejected (a file collection is a JSON array, not raw text).
 - When `extension` is omitted, the loader uses `yml` for YAML (the `yml` and `yaml` format values are the same), `json` for JSON, `toml` for TOML, and `md` otherwise. Astro must have an entry parser registered for the selected extension; inferring an extension does not add a parser.
 - Relations are converted to Astro references assuming the stored value matches the target entry ID and the CMS collection name matches the Astro collection key. Custom `value_field` mappings are not resolved.
 - i18n structures other than `multiple_folders` are not supported.

@@ -7,12 +7,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { isEntryCollection, readCmsConfig } from "../src/config.ts";
 import { jsonArrayToKeyedObject, sveltiaLoader } from "../src/loader.ts";
+import { loadRawCollection } from "../src/raw-loader.ts";
 import { sveltiaSchema } from "../src/schema.ts";
 import { transformFieldValues } from "../src/transforms.ts";
 
 vi.mock("astro/loaders", () => ({
     glob: vi.fn(() => ({ load: vi.fn() })),
     file: vi.fn(() => ({ load: vi.fn() })),
+}));
+vi.mock("../src/raw-loader.ts", () => ({
+    loadRawCollection: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("node:fs", async (importOriginal) => ({
     ...(await importOriginal<typeof import("node:fs")>()),
@@ -55,17 +59,50 @@ describe("collection storage", () => {
         expect(glob).not.toHaveBeenCalled();
     });
 
-    it("rejects the raw format with a clear error", async () => {
-        const loader = sveltiaLoader({
-            name: "posts",
+    it("routes a raw folder collection to the raw loader (not glob)", async () => {
+        await sveltiaLoader({
+            name: "configs",
             folder: "content",
+            fields: [{ name: "body", widget: "code" }],
+            format: "raw",
+        }).load({} as LoaderContext);
+        expect(loadRawCollection).toHaveBeenCalledWith(
+            expect.objectContaining({ name: "configs" }),
+            "content",
+            "txt",
+            expect.anything(),
+        );
+        expect(glob).not.toHaveBeenCalled();
+    });
+
+    it("rejects raw on a file collection (JSON arrays are not raw text)", async () => {
+        const loader = sveltiaLoader({
+            name: "settings",
+            file: "settings.json",
             fields: [],
             format: "raw",
         });
         await expect(loader.load({} as LoaderContext)).rejects.toThrow(
-            /raw.*not supported/,
+            /raw.*not supported for file|file collections/i,
         );
-        await expect(loader.createSchema()).rejects.toThrow(/raw.*not supported/);
+        await expect(loader.createSchema()).rejects.toThrow(/raw.*file/i);
+        expect(fileLoader).not.toHaveBeenCalled();
+        expect(glob).not.toHaveBeenCalled();
+    });
+
+    it("rejects the json-frontmatter format with a pointer to the json alternative", async () => {
+        const loader = sveltiaLoader({
+            name: "posts",
+            folder: "content",
+            fields: [],
+            format: "json-frontmatter",
+        });
+        await expect(loader.load({} as LoaderContext)).rejects.toThrow(
+            /json-frontmatter.*not supported.*json.*folder collection/s,
+        );
+        await expect(loader.createSchema()).rejects.toThrow(
+            /json-frontmatter.*not supported/,
+        );
         expect(glob).not.toHaveBeenCalled();
     });
 

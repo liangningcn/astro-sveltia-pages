@@ -109,6 +109,32 @@ describe("buildCmsConfig — r2", () => {
     });
 });
 
+describe("buildCmsConfig — logo", () => {
+    it("forwards logoUrl to the modern logo.src key, not the deprecated logo_url", () => {
+        const { config } = buildCmsConfig(
+            { ...baseOptions, logoUrl: "https://example.com/logo.svg" },
+            "https://example.com",
+        );
+
+        const raw = config as Record<string, unknown>;
+        expect(raw["logo"]).toEqual({ src: "https://example.com/logo.svg" });
+        expect(raw["logo_url"]).toBeUndefined();
+        expect(JSON.stringify(config)).not.toContain("logo_url");
+    });
+
+    it("forwards the logo object as-is", () => {
+        const { config } = buildCmsConfig(
+            { ...baseOptions, logo: { src: "/logo.svg", header: false } },
+            "https://example.com",
+        );
+
+        expect((config as Record<string, unknown>)["logo"]).toEqual({
+            src: "/logo.svg",
+            header: false,
+        });
+    });
+});
+
 describe("buildCmsConfig — extraConfig", () => {
     it("reports overridden keys in final key order", () => {
         const { config, conflicts } = buildCmsConfig(

@@ -42,8 +42,10 @@ export async function buildCollectionSchema(
     collection: EntryCollection,
 ): Promise<{ schema: z.ZodType; types: string }> {
     const ctx: SchemaContext = { imageSchemas: [], relationSchemas: new Map() };
+    const format = resolveFormat(collection);
     const schema = sveltiaSchema(collection.fields, {
-        excludeBody: frontmatterFormats.has(resolveFormat(collection)),
+        excludeBody: frontmatterFormats.has(format),
+        rawBody: format === "raw",
         ctx,
     });
 

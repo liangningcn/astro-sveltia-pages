@@ -350,11 +350,22 @@ export function fieldToZod(field: Field, ctx?: SchemaContext): z.ZodType {
 
 export function sveltiaSchema(
     fields: Field[],
-    { excludeBody = true, ctx }: { excludeBody?: boolean; ctx?: SchemaContext } = {},
+    {
+        excludeBody = true,
+        rawBody = false,
+        ctx,
+    }: { excludeBody?: boolean; rawBody?: boolean; ctx?: SchemaContext } = {},
 ): z.ZodObject<Record<string, z.ZodType>> {
     const shape: Record<string, z.ZodType> = {};
     for (const field of fields) {
         if (excludeBody && isBodyField(field)) {
+            continue;
+        }
+        // A `raw` collection stores the whole file as plain text in `body`,
+        // regardless of the field's widget. Force a string schema so a `code`
+        // widget body (which normally expects `{ code, lang }`) still validates.
+        if (rawBody && field.name === "body") {
+            shape[field.name] = applyOptional(z.string(), field);
             continue;
         }
         shape[field.name] = applyOptional(fieldToZod(field, ctx), field);

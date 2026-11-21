@@ -48,6 +48,17 @@ describe("sveltiaSchema — body field exclusion", () => {
         expect(schema.shape).toHaveProperty("body");
     });
 
+    it("rawBody: a code-widget body validates as a plain string", () => {
+        const schema = sveltiaSchema([{ name: "body", widget: "code" }], {
+            excludeBody: false,
+            rawBody: true,
+        });
+        expect(schema.safeParse({ body: "hello { raw } text" }).success).toBe(true);
+        expect(schema.safeParse({ body: { code: "x", lang: "js" } }).success).toBe(
+            false,
+        );
+    });
+
     it("excludes only the body, keeping all other fields", () => {
         const schema = sveltiaSchema([
             { name: "title", widget: "string" },

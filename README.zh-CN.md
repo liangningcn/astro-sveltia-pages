@@ -110,40 +110,45 @@ astro build
 
 ### 配置项参考
 
-| 配置项              | 类型                        | 默认值                 | 说明                                                                                            |
-| ------------------- | --------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------- |
-| `repo`              | `string`                    | —                      | GitHub 仓库，格式 `owner/name`。必填。                                                          |
-| `branch`            | `string`                    | `"main"`               | CMS 提交更改的分支。                                                                            |
-| `siteUrl`           | `string`                    | Astro `site`           | 用作 CMS `base_url` 的源站地址。两者都未设置时构建会失败。                                      |
-| `collections`       | `SveltiaCollection[]`       | —                      | 1:1 映射到 CMS 配置。必填。                                                                     |
-| `r2`                | `object`                    | —                      | Cloudflare R2 外部媒体库（见[媒体存储](#cloudflare-r2-媒体存储)）。                             |
-| `mediaFolder`       | `string`                    | `"public/images"`      | CMS `media_folder`。                                                                            |
-| `publicFolder`      | `string`                    | `"/images"`            | CMS `public_folder`。                                                                           |
-| `appTitle`          | `string`                    | `"Sveltia CMS"`        | 浏览器标签 / 登录页标题。                                                                       |
-| `logo`              | `{ src, ... }`              | —                      | CMS 徽标，转发为 `logo`。                                                                       |
-| `backendName`       | `string`                    | `"github"`             | Git 后端名称。                                                                                  |
-| `sveltiaVersion`    | `string`                    | `"0.270.0"`            | 从 unpkg 加载的 Sveltia 版本，**已锁定**以保证可复现（此前为 `"latest"`）。仅在有意升级时覆盖。 |
-| `extraConfig`       | `object`                    | —                      | 逃生通道，浅合并进生成的配置。与生成值冲突的键会覆盖生成值，并对每个冲突键输出一条警告。        |
-| `platform`          | `"cloudflare" \| "edgeone"` | `"cloudflare"`         | OAuth 代理的部署平台。决定函数模板以及配置环境变量的后台。                                      |
-| `singletons`        | `unknown[]`                 | —                      | 单文件配置，转发为 `singletons`。                                                               |
-| `assetCollections`  | `unknown[]`                 | —                      | 资产集合，转发为 `asset_collections`。                                                          |
-| `i18n`              | `object`                    | —                      | 全局 i18n 选项，转发为 `i18n`。                                                                 |
-| `readonly`          | `boolean`                   | `false`                | 将整个 CMS 设为只读，转发为 `readonly`。                                                        |
-| `showPreviewLinks`  | `boolean`                   | —（Sveltia：`true`）   | 是否显示线上 / 预览环境链接；**仅在设置时**转发为 `show_preview_links`。                        |
-| `displayUrl`        | `string`                    | —                      | UI 中跳转的地址，转发为 `display_url`。                                                         |
-| `logoutRedirectUrl` | `string`                    | —                      | 登出后跳转地址，转发为 `logout_redirect_url`。                                                  |
-| `editor`            | `object`                    | —                      | 编辑器视图选项，转发为 `editor`。                                                               |
-| `publishMode`       | `string \| object`          | —（Sveltia：`simple`） | 发布模式，**仅在设置时**转发为 `publish_mode`。                                                 |
-| `fieldDefaults`     | `object`                    | —                      | 字段默认选项，转发为 `field_defaults`。                                                         |
-| `output`            | `object`                    | —                      | 数据输出选项，转发为 `output`。                                                                 |
-| `slug`              | `object`                    | —                      | 条目与资产的 slug 选项，转发为 `slug`。                                                         |
-| `logoUrl`           | `string`                    | —                      | 入口页 / favicon 徽标地址，转发为 `logo_url`。                                                  |
+| 配置项              | 类型                        | 默认值                 | 说明                                                                                                      |
+| ------------------- | --------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `repo`              | `string`                    | —                      | GitHub 仓库，格式 `owner/name`。必填。                                                                    |
+| `branch`            | `string`                    | `"main"`               | CMS 提交更改的分支。                                                                                      |
+| `siteUrl`           | `string`                    | Astro `site`           | 用作 CMS `base_url` 的源站地址。两者都未设置时构建会失败。                                                |
+| `collections`       | `SveltiaCollection[]`       | —                      | 1:1 映射到 CMS 配置。必填。                                                                               |
+| `r2`                | `object`                    | —                      | Cloudflare R2 外部媒体库（见[媒体存储](#cloudflare-r2-媒体存储)）。                                       |
+| `mediaFolder`       | `string`                    | `"public/images"`      | CMS `media_folder`。                                                                                      |
+| `publicFolder`      | `string`                    | `"/images"`            | CMS `public_folder`。                                                                                     |
+| `appTitle`          | `string`                    | `"Sveltia CMS"`        | 浏览器标签 / 登录页标题。                                                                                 |
+| `logo`              | `{ src, ... }`              | —                      | CMS 徽标，转发为 `logo`。                                                                                 |
+| `backendName`       | `string`                    | `"github"`             | Git 后端名称。                                                                                            |
+| `sveltiaVersion`    | `string`                    | `"0.270.0"`            | 从 unpkg 加载的 Sveltia 版本，**已锁定**以保证可复现（此前为 `"latest"`）。仅在有意升级时覆盖。           |
+| `extraConfig`       | `object`                    | —                      | 逃生通道，浅合并进生成的配置。与生成值冲突的键会覆盖生成值，并对每个冲突键输出一条警告。                  |
+| `platform`          | `"cloudflare" \| "edgeone"` | `"cloudflare"`         | OAuth 代理的部署平台。决定函数模板以及配置环境变量的后台。                                                |
+| `singletons`        | `unknown[]`                 | —                      | 单文件配置，转发为 `singletons`。                                                                         |
+| `assetCollections`  | `unknown[]`                 | —                      | 资产集合，转发为 `asset_collections`。                                                                    |
+| `i18n`              | `object`                    | —                      | 全局 i18n 选项，转发为 `i18n`。                                                                           |
+| `readonly`          | `boolean`                   | `false`                | 将整个 CMS 设为只读，转发为 `readonly`。                                                                  |
+| `showPreviewLinks`  | `boolean`                   | —（Sveltia：`true`）   | 是否显示线上 / 预览环境链接；**仅在设置时**转发为 `show_preview_links`。                                  |
+| `displayUrl`        | `string`                    | —                      | UI 中跳转的地址，转发为 `display_url`。                                                                   |
+| `logoutRedirectUrl` | `string`                    | —                      | 登出后跳转地址，转发为 `logout_redirect_url`。                                                            |
+| `editor`            | `object`                    | —                      | 编辑器视图选项，转发为 `editor`。                                                                         |
+| `publishMode`       | `string \| object`          | —（Sveltia：`simple`） | 发布模式，**仅在设置时**转发为 `publish_mode`。                                                           |
+| `fieldDefaults`     | `object`                    | —                      | 字段默认选项，转发为 `field_defaults`。                                                                   |
+| `output`            | `object`                    | —                      | 数据输出选项，转发为 `output`。                                                                           |
+| `slug`              | `object`                    | —                      | 条目与资产的 slug 选项，转发为 `slug`。Sveltia 已废弃集合级 `slug_length`，请改用 `slug: { maxlength }`。 |
+| `logoUrl`           | `string`                    | —                      | 入口页 / favicon 徽标地址，转发为 `logo: { src }`（Sveltia 已废弃 `logo_url` 键；本选项名保持不变）。     |
 
 `collections` 条目必须包含 `name`、`folder` 和 `fields`；其余所有 Sveltia 集合选项（`create`、集合级 `slug`、`i18n`、`media_folder` 等）原样透传。
 
 **已提升的配置项。** `platform` 行以下的 13 个配置项此前只能通过 `extraConfig` 设置。现在它们成为一等公民，经过类型校验，并转发到对应的 Sveltia 配置键。**仅当你设置时才会输出** —— 集成不会覆盖 Sveltia 自身的默认值，因此默认值列中的 `—` 表示"不输出，使用 Sveltia 默认值"。`extraConfig` 依然可用，并能覆盖其中任意一项（每个冲突键输出一条警告）。
 
 **0.3.1 移除：** 集成层的 `locale` 配置项已被删除。Sveltia 没有 `locale` 配置键（该值此前被静默忽略），CMS 界面语言跟随浏览器。**Loader** 上的 `locale` 参数 —— `sveltiaLoader(name, { locale })` —— 与此无关，予以保留。
+
+**值得了解的 Sveltia 行为变化**（不由本包控制，升级 `sveltiaVersion` 时相关）：
+
+- 自 Sveltia v0.105.0 起，Markdown widget 的预览净化（`sanitize_preview`）默认值为 `true`，以防御 XSS。若你依赖在预览中渲染原始 HTML，请在字段上显式设置 `sanitize_preview: false`。
+- Sveltia 已废弃集合级 `slug_length`（改用全局 `slug: { maxlength }`）与顶层 `logo_url` 键（改用 `logo: { src }` —— 本包的 `logoUrl` 选项已转发到新键）。
 
 ### 身份认证（GitHub OAuth）
 
@@ -335,7 +340,8 @@ export const collections = { posts: defineCollection({ loader: posts }) };
 | folder   | `yaml` / `yml`                          | `yml`      | 每条一个 YAML 文件。                                        |
 | folder   | `json`                                  | `json`     | 每条一个 JSON 文件。                                        |
 | folder   | `toml`                                  | `toml`     | 每条一个 TOML 文件。                                        |
-| file     | （任意）                                | —          | 单个 JSON 数组；每个元素为一条条目，ID = 0 起算的数组下标。 |
+| folder   | `raw`                                   | `txt`      | 每条一个完整纯文本文件，全部内容加载到唯一的 `body` 字段。  |
+| file     | （任意，除 `raw` 外）                   | —          | 单个 JSON 数组；每个元素为一条条目，ID = 0 起算的数组下标。 |
 
 无论何种格式，Zod schema 均由 CMS 的 `fields` 自动生成；`body` 字段仅在前置 frontmatter 类格式下排除。设置 `extension` 可覆盖推断的默认值（`extension` 优先于 `format`）。
 
@@ -388,12 +394,35 @@ sveltia({
 const links = defineCollection({ loader: sveltiaLoader("links") });
 ```
 
+`raw` folder 集合 —— 每条一个完整的纯文本文件（例如 `.astro` 片段或作为文本编辑的 `.json` 配置文件）。按 Sveltia 对 `raw` 的要求，只需定义一个 `body` 字段：
+
+```js
+sveltia({
+    /* ... */
+    collections: [
+        {
+            name: "snippets",
+            label: "Snippets",
+            folder: "src/snippets",
+            format: "raw",
+            extension: "astro",
+            fields: [{ name: "body", widget: "code" }],
+        },
+    ],
+});
+```
+
+```ts
+// 每个文件的完整文本可通过 entry.data.body 获取；条目 ID 为文件相对该文件夹的路径（不含扩展名）。
+const snippets = defineCollection({ loader: sveltiaLoader("snippets") });
+```
+
 **限制：**
 
 - 集合必须包含非空的 `folder` 或 `file`，以及 `fields` 数组。不支持 `files` 形式的集合（多个互不相关、各有一组字段的文件）、`{{locale}}` 文件夹占位符和顶层列表 / 键值存储（`root: true`）。
 - 不支持 `json-frontmatter` 格式：Astro 内置的 glob 解析器只识别 `---` 和 `+++` 分隔符，不识别 `{ }`。需要 JSON 数据请改用 `json` 的 folder 集合（每条一个 `.json` 文件），该路径完全可用。
 - file 集合（`file`）将每个数组元素作为一条条目加载，ID 为 0 起算的数组下标，与 Sveltia 按位置定义的 slug 一致。file 集合不支持 `locale` 参数（所有语言都存放在同一个 JSON 数组里），传入会报错。
-- `raw` 格式会报错：Astro 没有内置的纯文本解析器。如有需要，请先为对应扩展名注册自定义 content entry type。
+- `raw` 格式仅支持 folder 集合：每个文件的完整文本成为唯一的 `body` 字段（默认扩展名 `txt`，可用 `extension` 覆盖）。按 Sveltia 对 `raw` 的定义，它要求集合只有一个 `body` 字段。file 集合上使用 `raw` 会被拒绝（file 集合存放的是 JSON 数组，而非纯文本）。
 - 省略 `extension` 时，loader 对 YAML 使用 `yml`（`yml` 与 `yaml` 两种 format 取值等价）、JSON 使用 `json`、TOML 使用 `toml`，其余使用 `md`。Astro 必须为所选扩展名注册条目解析器；推断扩展名不会自动添加解析器。
 - 关联（relations）被转换为 Astro 引用，前提是存储值与目标条目 ID 匹配且 CMS 集合名称与 Astro 集合键匹配。不会解析自定义的 `value_field` 映射。
 - 除 `multiple_folders` 之外的 i18n 结构均不支持。

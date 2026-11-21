@@ -196,6 +196,22 @@ describe("sveltiaLoader — object form", () => {
         expect(s.shape).toHaveProperty("name");
     });
 
+    it("createSchema() types a raw collection's code-widget body as a plain string", async () => {
+        const col: EntryCollection = {
+            name: "snippets",
+            folder: "src/snippets",
+            format: "raw",
+            fields: [{ name: "body", widget: "code" }],
+        };
+        const loader = sveltiaLoader(col);
+        const { schema, types } = await loader.createSchema!();
+        const parsed = schema as unknown as {
+            safeParse: (data: unknown) => { success: boolean };
+        };
+        expect(parsed.safeParse({ body: "const x = 1;" }).success).toBe(true);
+        expect(types).toContain("body: string");
+    });
+
     it("createSchema() includes body for the yml format alias", async () => {
         const col: EntryCollection = {
             name: "data",

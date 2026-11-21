@@ -10,6 +10,50 @@ section below.
 
 ---
 
+## 0.6.0
+
+### Added
+
+- **The `raw` format is now supported** for folder collections. Sveltia's
+  `raw` format stores each entry as a whole plain-text file (`.astro`, `.txt`,
+  `.json`, `.xml`, `.csv`, …) with no frontmatter; the entire file content is
+  loaded into the single `body` field. A dedicated loader reads these files as
+  UTF-8 and injects `{ body: content }` through the normal `parseData` path, so
+  field transforms and the Zod schema still apply. It supports nested folders,
+  extension filtering, digest-based change detection, dev-server hot reload,
+  deletion cleanup, and i18n `multiple_folders` locales just like other folder
+  collections. The default extension for `raw` is `txt` (override with
+  `extension`). `raw` on a file collection is rejected, since a file collection
+  is a JSON array rather than raw text.
+- `logoUrl` is now forwarded as `logo: { src }`: Sveltia deprecated the
+  top-level `logo_url` config key (superseded by `logo.src`). The public option
+  name is unchanged; setting both `logo` and `logoUrl` is now rejected as
+  mutually exclusive.
+
+### Changed
+
+- The `json-frontmatter` format now fails fast with a clear, actionable error
+  pointing to a `json` folder collection (previously it reached the parser and
+  failed less helpfully). It remains unsupported — Astro's built-in glob parser
+  only recognizes `---` and `+++`, not `{ }`.
+- Documented Sveltia behavior changes to be aware of when bumping
+  `sveltiaVersion`: `sanitize_preview` defaults to `true` since Sveltia
+  v0.105.0, and collection-level `slug_length` is deprecated in favor of the
+  global `slug: { maxlength }`.
+- The i18n template version is bumped to **0.6.0** per the project convention
+  of tracking the package version, so site repositories get an unambiguous
+  upgrade signal (no i18n template content changed).
+
+### Migration
+
+- **No breaking changes.** Existing collections continue to work unchanged.
+  To use `raw`, set `format: "raw"` on a folder collection (and optionally
+  `extension` for the text file suffix); define a single `body` field in the
+  collection's `fields`, as Sveltia requires for `raw`.
+- After upgrading, re-run `pnpm exec astro-sveltia-pages init:i18n` in every
+  site repository and commit the three regenerated snapshots; the template
+  version stamp moves to `0.6.0`, so `init:i18n --check` gates stale templates.
+
 ## 0.5.0
 
 ### Added

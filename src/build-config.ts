@@ -33,7 +33,6 @@ export const PROMOTED_OPTIONS: ReadonlyArray<
     ["fieldDefaults", "field_defaults"],
     ["output", "output"],
     ["slug", "slug"],
-    ["logoUrl", "logo_url"],
 ];
 
 export type BuildCmsConfigResult = {
@@ -125,6 +124,11 @@ export function buildCmsConfig(
 
     if (options.logo) {
         config.logo = options.logo;
+    } else if (options.logoUrl) {
+        // `logo_url` is deprecated in Sveltia (superseded by `logo.src`);
+        // forward the option to the new key so the generated config stays
+        // warning-free on current Sveltia versions.
+        config.logo = { src: options.logoUrl };
     }
 
     config.collections = options.collections;
