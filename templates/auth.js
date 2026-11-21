@@ -38,12 +38,19 @@ function normalizeContext(input, env) {
         );
     return { ...context, request: context.request, env: context.env ?? env };
 }
+//#endregion
+//#region src/functions/adapter.ts
+/** Client IP placeholder used when the runtime does not expose the real one. */
+var UNKNOWN_CLIENT_IP = "unknown";
 /**
  * Reads a string value from an unknown environment bag.
  *
  * Cloudflare exposes `context.env` as a plain object, EdgeOne may expose it as
- * a global object or through `process.env`; all of them are plain objects with
- * string values.
+ * a global object or through `process.env`, Vercel/Netlify expose it through
+ * `process.env` / `context.env` / a global `Netlify` object, Deno Deploy
+ * exposes it through `Deno.env.get()`. Plain objects with string/number/
+ * boolean values are all accepted here; the Deno adapter reads `Deno.env`
+ * directly before falling back to this helper.
  */
 function readEnvValue(env, key) {
     if (!env || typeof env !== "object") return;
@@ -65,30 +72,78 @@ function resolveSiteOrigin(context, url, adapter) {
 }
 //#endregion
 //#region src/functions/cloudflare.ts
-function getEnv$1(context, key) {
+function getEnv$4(context, key) {
     return readEnvValue(context.env, key);
 }
-function getClientIp$1(request) {
+function getClientIp$4(request) {
     return request.headers.get("CF-Connecting-IP")?.trim() || "unknown";
 }
-function getOrigin$1(context, url) {
+function getOrigin$4(context, url) {
     return resolveSiteOrigin(context, url, cloudflareAdapter);
 }
 /**
  * Cloudflare Pages adapter.
  *
  * Environment variables come from `context.env`, the client IP from the
- * `CF-Connecting-IP` header that Cloudflare sets on every request.
+ * `CF-Connecting-IP` header that Cloudflare sets on every request. The
+ * optional `context` parameter of {@link getClientIp} is ignored.
  */
 var cloudflareAdapter = {
     name: "cloudflare",
-    getEnv: getEnv$1,
-    getClientIp: getClientIp$1,
-    getOrigin: getOrigin$1,
+    getEnv: getEnv$4,
+    getClientIp: getClientIp$4,
+    getOrigin: getOrigin$4,
+};
+//#endregion
+//#region src/functions/deno.ts
+/**
+ * Deno Deploy exposes env through `Deno.env.get()`; the Node-compatible
+ * `process.env` is also present in some Deno runtimes and is used as a
+ * fallback. `context.env` is checked first so a future Deno entry shape
+ * works without an adapter change.
+ */
+function getEnv$3(context, key) {
+    const fromContext = readEnvValue(context.env, key);
+    if (fromContext !== void 0) return fromContext;
+    const deno = globalThis.Deno;
+    if (deno?.env?.get)
+        try {
+            const value = deno.env.get(key);
+            if (typeof value === "string") return value;
+        } catch {}
+    const processEnv = globalThis.process?.env;
+    return readEnvValue(processEnv, key);
+}
+/**
+ * Deno Deploy does not expose a trusted runtime-set client IP. The
+ * `x-forwarded-for` header is the only signal available; it can be forged by
+ * the client, so the rate limit may be rotated by a determined attacker.
+ * This trade-off is documented in the README and is the same compromise every
+ * Deno Deploy OAuth proxy has to make.
+ */
+function getClientIp$3(request) {
+    const forwarded = request.headers.get("x-forwarded-for")?.trim();
+    if (forwarded) return forwarded.split(",")[0]?.trim() || forwarded;
+    return UNKNOWN_CLIENT_IP;
+}
+function getOrigin$3(context, url) {
+    return resolveSiteOrigin(context, url, denoAdapter);
+}
+/**
+ * Deno Deploy adapter.
+ *
+ * Env variables come from `Deno.env.get()` and `process.env`; the client IP is
+ * read from `x-forwarded-for` (the only signal Deno Deploy exposes).
+ */
+var denoAdapter = {
+    name: "deno",
+    getEnv: getEnv$3,
+    getClientIp: getClientIp$3,
+    getOrigin: getOrigin$3,
 };
 //#endregion
 //#region src/functions/edgeone.ts
-function getEnv(context, key) {
+function getEnv$2(context, key) {
     const fromContext = readEnvValue(context.env, key);
     if (fromContext !== void 0) return fromContext;
     const globalEnv = globalThis.env;
@@ -97,10 +152,10 @@ function getEnv(context, key) {
     const processEnv = globalThis.process?.env;
     return readEnvValue(processEnv, key);
 }
-function getClientIp(request) {
+function getClientIp$2(request) {
     return request.eo?.clientIp?.trim() || "unknown";
 }
-function getOrigin(context, url) {
+function getOrigin$2(context, url) {
     return resolveSiteOrigin(context, url, edgeoneAdapter);
 }
 /**
@@ -109,34 +164,160 @@ function getOrigin(context, url) {
  * Environment variables are read from `context.env` first and from the global
  * `env` object afterwards; the client IP comes from `request.eo.clientIp`.
  */
-var edgeoneAdapter = { name: "edgeone", getEnv, getClientIp, getOrigin };
+var edgeoneAdapter = {
+    name: "edgeone",
+    getEnv: getEnv$2,
+    getClientIp: getClientIp$2,
+    getOrigin: getOrigin$2,
+};
+//#endregion
+//#region src/functions/netlify.ts
+/**
+ * Netlify Edge Functions expose env through three sources: the `context.env`
+ * object, the global `Netlify.env.get()` method (Deno runtime), and
+ * `process.env` (Node runtime / local fallback). They are checked in that
+ * order so the runtime-controlled value wins.
+ */
+function getEnv$1(context, key) {
+    const fromContext = readEnvValue(context.env, key);
+    if (fromContext !== void 0) return fromContext;
+    const netlify = globalThis.Netlify;
+    if (netlify?.env?.get)
+        try {
+            const value = netlify.env.get(key);
+            if (typeof value === "string") return value;
+        } catch {}
+    const processEnv = globalThis.process?.env;
+    return readEnvValue(processEnv, key);
+}
+/**
+ * Netlify Edge Functions expose the client IP through `context.ip` (current)
+ * or `context.geo.ip` (older runtime). Both are runtime-set and cannot be
+ * forged by the client. The `x-forwarded-for` header is deliberately NOT
+ * trusted: on Netlify it is derived from the same runtime value, and trusting
+ * it directly would let a client forge the rate-limit key.
+ *
+ * When the adapter is invoked without a context (e.g. from
+ * `autoAdapter.getClientIp(request)` without context), it falls back to
+ * `unknown` rather than reading a header.
+ */
+function getClientIp$1(request, context) {
+    if (context) {
+        const directIp = readIp(context.ip);
+        if (directIp) return directIp;
+        const geoIp = readIp(context.geo?.ip);
+        if (geoIp) return geoIp;
+    }
+    const ctxIp = request.clientIp;
+    return readIp(ctxIp) || "unknown";
+}
+function readIp(value) {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+}
+function getOrigin$1(context, url) {
+    return resolveSiteOrigin(context, url, netlifyAdapter);
+}
+/**
+ * Netlify adapter.
+ *
+ * Env variables come from `context.env`, the global `Netlify.env` object and
+ * `process.env`; the client IP comes from `context.ip` / `context.geo.ip`
+ * (set by the runtime). The handler passes the context to `getClientIp` so
+ * the IP is read from the trusted runtime value instead of a forgeable header.
+ */
+var netlifyAdapter = {
+    name: "netlify",
+    getEnv: getEnv$1,
+    getClientIp: getClientIp$1,
+    getOrigin: getOrigin$1,
+};
+//#endregion
+//#region src/functions/vercel.ts
+/**
+ * Vercel Edge Functions expose env through `process.env` (Edge runtime and
+ * Node runtime both support it). `context.env` is checked first so a future
+ * Vercel context shape works without an adapter change.
+ */
+function getEnv(context, key) {
+    const fromContext = readEnvValue(context.env, key);
+    if (fromContext !== void 0) return fromContext;
+    const processEnv = globalThis.process?.env;
+    return readEnvValue(processEnv, key);
+}
+/**
+ * Vercel sets `x-vercel-forwarded-for` (trusted) and `x-vercel-ip-*` headers
+ * on every edge request. The platform-controlled `x-vercel-forwarded-for` is
+ * preferred because it mirrors Cloudflare's `CF-Connecting-IP` contract.
+ */
+function getClientIp(request) {
+    const headers = request.headers;
+    const vercelFwd = headers.get("x-vercel-forwarded-for")?.trim();
+    if (vercelFwd) return vercelFwd.split(",")[0]?.trim() || vercelFwd;
+    const vercelIp = headers.get("x-vercel-ip")?.trim();
+    if (vercelIp) return vercelIp;
+    return UNKNOWN_CLIENT_IP;
+}
+function getOrigin(context, url) {
+    return resolveSiteOrigin(context, url, vercelAdapter);
+}
+/**
+ * Vercel adapter.
+ *
+ * Env variables come from `process.env` (Edge runtime exposes them the same
+ * way); the client IP comes from Vercel's `x-vercel-forwarded-for` /
+ * `x-vercel-ip` headers, which are set by the platform and cannot be forged
+ * by the client.
+ */
+var vercelAdapter = { name: "vercel", getEnv, getClientIp, getOrigin };
 //#endregion
 //#region src/functions/detect.ts
+function isNetlifyContext(context) {
+    if (typeof globalThis.Netlify !== "undefined") return true;
+    const ctx = context;
+    return (
+        ctx.site !== void 0 ||
+        ctx.ip !== void 0 ||
+        (ctx.geo !== void 0 && typeof ctx.geo === "object")
+    );
+}
+function isDenoRuntime() {
+    return typeof globalThis.Deno !== "undefined";
+}
 /**
- * Detects the platform from the request shape.
+ * Detects the platform from the request shape and runtime globals.
  *
- * EdgeOne attaches an `eo` namespace to the request, Cloudflare sets the
- * `CF-Connecting-IP` header. Anything unknown falls back to Cloudflare, whose
- * adapter degrades to `"unknown"` for the client IP.
+ * Priority (most specific first):
+ *  1. EdgeOne — `request.eo` namespace.
+ *  2. Netlify — global `Netlify` object or `context.site` / `context.ip` /
+ *     `context.geo`.
+ *  3. Deno Deploy — global `Deno` object.
+ *  4. Vercel — `x-vercel-forwarded-for` or `x-vercel-ip` header.
+ *  5. Cloudflare — `CF-Connecting-IP` header.
+ *  6. Fallback — Cloudflare adapter (degrades to `unknown` client IP).
  */
 function detectAdapter(context) {
     const request = context.request;
     if (request?.eo && typeof request.eo === "object") return edgeoneAdapter;
-    if (request?.headers?.has("CF-Connecting-IP")) return cloudflareAdapter;
+    if (isNetlifyContext(context)) return netlifyAdapter;
+    if (isDenoRuntime()) return denoAdapter;
+    const headers = request?.headers;
+    if (headers?.has("x-vercel-forwarded-for") || headers?.has("x-vercel-ip"))
+        return vercelAdapter;
+    if (headers?.has("CF-Connecting-IP")) return cloudflareAdapter;
     return cloudflareAdapter;
 }
 /**
  * Adapter that resolves the platform implementation per request.
  *
- * Use it when a single bundle has to serve both platforms.
+ * Use it when a single bundle has to serve every supported platform.
  */
 var autoAdapter = {
     name: "auto",
     getEnv(context, key) {
         return detectAdapter(context).getEnv(context, key);
     },
-    getClientIp(request) {
-        return detectAdapter({ request }).getClientIp(request);
+    getClientIp(request, context) {
+        return detectAdapter(context ?? { request }).getClientIp(request, context);
     },
     getOrigin(context, url) {
         return detectAdapter(context).getOrigin(context, url);
@@ -144,9 +325,20 @@ var autoAdapter = {
 };
 /** Returns the adapter of a platform, or the auto-detecting one. */
 function adapterFor(platform) {
-    if (platform === "cloudflare") return cloudflareAdapter;
-    if (platform === "edgeone") return edgeoneAdapter;
-    return autoAdapter;
+    switch (platform) {
+        case "cloudflare":
+            return cloudflareAdapter;
+        case "edgeone":
+            return edgeoneAdapter;
+        case "vercel":
+            return vercelAdapter;
+        case "netlify":
+            return netlifyAdapter;
+        case "deno":
+            return denoAdapter;
+        default:
+            return autoAdapter;
+    }
 }
 //#endregion
 //#region src/functions/rate-limit.ts
@@ -526,7 +718,7 @@ function createAuthHandler(options = {}) {
                 { error: "GitHub OAuth credentials not configured" },
                 500,
             );
-        const clientIp = resolvedAdapter.getClientIp(request);
+        const clientIp = resolvedAdapter.getClientIp(request, context);
         if (limiter && !limiter.hit(clientIp, now()))
             return jsonResponse({ error: "Too many requests" }, 429);
         const origin = resolvedAdapter.getOrigin(context, url);

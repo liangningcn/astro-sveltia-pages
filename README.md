@@ -2,11 +2,11 @@
 
 English | [中文文档](README.zh-CN.md)
 
-Sveltia CMS, wired into Astro with **zero hand-written CMS config**. Built for Cloudflare Pages and EdgeOne Pages.
+Sveltia CMS, wired into Astro with **zero hand-written CMS config**. Built for Cloudflare Pages, EdgeOne Pages, Vercel, Netlify and Deno Deploy.
 
 - **One options object → CMS UI.** Generates `/admin/index.html` and `/admin/config.yml` into your build output from a single `sveltia({ ... })` call.
 - **External media library.** Configures Sveltia's Cloudflare R2 media library, with the secret key entered in the CMS UI (never written to disk).
-- **Production-ready OAuth.** Ships the exact GitHub OAuth edge function used in real deployments for both Cloudflare Pages (`functions/auth.js`) and EdgeOne Pages (`edge-functions/auth.js`), plus an `init` command that wires it up.
+- **Production-ready OAuth.** Ships the exact GitHub OAuth edge function used in real deployments for Cloudflare Pages (`functions/auth.js`), EdgeOne Pages (`edge-functions/auth.js`), Vercel (`api/auth.js`), Netlify (`netlify/edge-functions/auth.js`) and Deno Deploy (`serve.js`), plus an `init` command that wires it up.
 - **Typed content loader.** `astro-sveltia-pages/loader` reads the generated config and loads entries with automatic Zod schema generation.
 
 ## Contents
@@ -115,34 +115,34 @@ All configuration lives in the `sveltia({ ... })` options object. The integratio
 
 ### Options reference
 
-| Option              | Type                        | Default               | Description                                                                                                                                     |
-| ------------------- | --------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `repo`              | `string`                    | —                     | GitHub repository, `owner/name`. Required.                                                                                                      |
-| `branch`            | `string`                    | `"main"`              | Branch CMS changes are committed to.                                                                                                            |
-| `siteUrl`           | `string`                    | Astro `site`          | Origin used as CMS `base_url`. Build fails when neither is set.                                                                                 |
-| `collections`       | `SveltiaCollection[]`       | —                     | Mapped 1:1 into the CMS config. Required.                                                                                                       |
-| `r2`                | `object`                    | —                     | Cloudflare R2 external media library (see [Media Storage](#cloudflare-r2-media-storage)).                                                       |
-| `mediaFolder`       | `string`                    | `"public/images"`     | CMS `media_folder`.                                                                                                                             |
-| `publicFolder`      | `string`                    | `"/images"`           | CMS `public_folder`.                                                                                                                            |
-| `appTitle`          | `string`                    | `"Sveltia CMS"`       | Browser tab / login page title.                                                                                                                 |
-| `logo`              | `{ src, ... }`              | —                     | CMS logo, forwarded as `logo`.                                                                                                                  |
-| `backendName`       | `string`                    | `"github"`            | Git backend name.                                                                                                                               |
-| `sveltiaVersion`    | `string`                    | `"0.270.0"`           | Sveltia version loaded from unpkg, **pinned** for reproducibility (previously `"latest"`). Override only to upgrade deliberately.               |
-| `extraConfig`       | `object`                    | —                     | Escape hatch, shallowly merged into the generated config. Colliding keys override the generated value and emit one warning per key.             |
-| `platform`          | `"cloudflare" \| "edgeone"` | `"cloudflare"`        | Deployment platform of the OAuth proxy. Selects the function template and the dashboard the environment variables are configured in.            |
-| `singletons`        | `unknown[]`                 | —                     | Singleton files, forwarded as `singletons`.                                                                                                     |
-| `assetCollections`  | `unknown[]`                 | —                     | Asset collections, forwarded as `asset_collections`.                                                                                            |
-| `i18n`              | `object`                    | —                     | Global i18n options, forwarded as `i18n`.                                                                                                       |
-| `readonly`          | `boolean`                   | `false`               | Make the whole CMS read-only, forwarded as `readonly`.                                                                                          |
-| `showPreviewLinks`  | `boolean`                   | — (Sveltia: `true`)   | Show live/deploy-preview links; forwarded as `show_preview_links` **only when set**.                                                            |
-| `displayUrl`        | `string`                    | —                     | URL linked from the UI, forwarded as `display_url`.                                                                                             |
-| `logoutRedirectUrl` | `string`                    | —                     | Post-logout redirect URL, forwarded as `logout_redirect_url`.                                                                                   |
-| `editor`            | `object`                    | —                     | Editor view options, forwarded as `editor`.                                                                                                     |
-| `publishMode`       | `string \| object`          | — (Sveltia: `simple`) | Publish mode, forwarded as `publish_mode` **only when set**.                                                                                    |
-| `fieldDefaults`     | `object`                    | —                     | Default field options, forwarded as `field_defaults`.                                                                                           |
-| `output`            | `object`                    | —                     | Data output options, forwarded as `output`.                                                                                                     |
-| `slug`              | `object`                    | —                     | Slug options for entries and assets, forwarded as `slug`. Sveltia deprecated collection-level `slug_length`; use `slug: { maxlength }` instead. |
-| `logoUrl`           | `string`                    | —                     | Entrance page / favicon logo URL, forwarded as `logo: { src }` — Sveltia deprecated the `logo_url` key; the option name is unchanged.           |
+| Option              | Type                                                           | Default               | Description                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo`              | `string`                                                       | —                     | GitHub repository, `owner/name`. Required.                                                                                                      |
+| `branch`            | `string`                                                       | `"main"`              | Branch CMS changes are committed to.                                                                                                            |
+| `siteUrl`           | `string`                                                       | Astro `site`          | Origin used as CMS `base_url`. Build fails when neither is set.                                                                                 |
+| `collections`       | `SveltiaCollection[]`                                          | —                     | Mapped 1:1 into the CMS config. Required.                                                                                                       |
+| `r2`                | `object`                                                       | —                     | Cloudflare R2 external media library (see [Media Storage](#cloudflare-r2-media-storage)).                                                       |
+| `mediaFolder`       | `string`                                                       | `"public/images"`     | CMS `media_folder`.                                                                                                                             |
+| `publicFolder`      | `string`                                                       | `"/images"`           | CMS `public_folder`.                                                                                                                            |
+| `appTitle`          | `string`                                                       | `"Sveltia CMS"`       | Browser tab / login page title.                                                                                                                 |
+| `logo`              | `{ src, ... }`                                                 | —                     | CMS logo, forwarded as `logo`.                                                                                                                  |
+| `backendName`       | `string`                                                       | `"github"`            | Git backend name.                                                                                                                               |
+| `sveltiaVersion`    | `string`                                                       | `"0.270.0"`           | Sveltia version loaded from unpkg, **pinned** for reproducibility (previously `"latest"`). Override only to upgrade deliberately.               |
+| `extraConfig`       | `object`                                                       | —                     | Escape hatch, shallowly merged into the generated config. Colliding keys override the generated value and emit one warning per key.             |
+| `platform`          | `"cloudflare" \| "edgeone" \| "vercel" \| "netlify" \| "deno"` | `"cloudflare"`        | Deployment platform of the OAuth proxy. Selects the function template and the dashboard the environment variables are configured in.            |
+| `singletons`        | `unknown[]`                                                    | —                     | Singleton files, forwarded as `singletons`.                                                                                                     |
+| `assetCollections`  | `unknown[]`                                                    | —                     | Asset collections, forwarded as `asset_collections`.                                                                                            |
+| `i18n`              | `object`                                                       | —                     | Global i18n options, forwarded as `i18n`.                                                                                                       |
+| `readonly`          | `boolean`                                                      | `false`               | Make the whole CMS read-only, forwarded as `readonly`.                                                                                          |
+| `showPreviewLinks`  | `boolean`                                                      | — (Sveltia: `true`)   | Show live/deploy-preview links; forwarded as `show_preview_links` **only when set**.                                                            |
+| `displayUrl`        | `string`                                                       | —                     | URL linked from the UI, forwarded as `display_url`.                                                                                             |
+| `logoutRedirectUrl` | `string`                                                       | —                     | Post-logout redirect URL, forwarded as `logout_redirect_url`.                                                                                   |
+| `editor`            | `object`                                                       | —                     | Editor view options, forwarded as `editor`.                                                                                                     |
+| `publishMode`       | `string \| object`                                             | — (Sveltia: `simple`) | Publish mode, forwarded as `publish_mode` **only when set**.                                                                                    |
+| `fieldDefaults`     | `object`                                                       | —                     | Default field options, forwarded as `field_defaults`.                                                                                           |
+| `output`            | `object`                                                       | —                     | Data output options, forwarded as `output`.                                                                                                     |
+| `slug`              | `object`                                                       | —                     | Slug options for entries and assets, forwarded as `slug`. Sveltia deprecated collection-level `slug_length`; use `slug: { maxlength }` instead. |
+| `logoUrl`           | `string`                                                       | —                     | Entrance page / favicon logo URL, forwarded as `logo: { src }` — Sveltia deprecated the `logo_url` key; the option name is unchanged.           |
 
 `collections` entries require `name`, `folder` and `fields`; every other Sveltia collection option (`create`, collection-level `slug`, `i18n`, `media_folder`, …) is passed through unchanged.
 
@@ -157,7 +157,7 @@ All configuration lives in the `sveltia({ ... })` options object. The integratio
 
 ### Authentication (GitHub OAuth)
 
-The package does not host OAuth endpoints itself. Instead it ships the exact edge function used in production by real deployments. The OAuth logic (state signing, token exchange, `postMessage` handover) is platform agnostic; only the runtime accessors differ, so the same implementation runs on Cloudflare Pages and EdgeOne Pages.
+The package does not host OAuth endpoints itself. Instead it ships the exact edge function used in production by real deployments. The OAuth logic (state signing, token exchange, `postMessage` handover) is platform agnostic; only the runtime accessors differ, so the same implementation runs on Cloudflare Pages, EdgeOne Pages, Vercel, Netlify and Deno Deploy. The `init` command auto-detects the platform per request, so a single bundle serves every supported platform.
 
 > **Security:** Since 0.3.0 the GitHub token is posted back **only** to the configured `CMS_ORIGIN` (`https`, or `http://localhost` for local dev) — never to `"*"`. An attacker page that opens the auth popup cannot receive it. The receiving CMS must still verify `event.origin === CMS_ORIGIN`. `CMS_ORIGIN` is **required**; the auth endpoint returns `500` when it is missing or invalid.
 
@@ -251,6 +251,114 @@ Both platforms rate-limit the auth endpoint **per isolate**: the counters live i
 
 If the IP cannot be determined on EdgeOne, the limit therefore degrades to a global limit for those requests. Keep `ENVIRONMENT=production` so that the CORS preflight only answers your own origin.
 
+#### Vercel
+
+Vercel Edge Functions run on the V8 runtime and expose env through `process.env`. The auth function lives in `api/auth.js`.
+
+1. Run the init command with the Vercel flag:
+
+    ```bash
+    pnpm exec astro-sveltia-pages init --platform vercel --site-url https://example.com
+    ```
+
+    This copies the Vercel template to `api/auth.js` and writes the same env variables to `.env.example`.
+
+2. Create a GitHub OAuth App at <https://github.com/settings/developers> with the callback URL `https://{your-vercel-domain}/auth`.
+
+3. Set the environment variables in the **Vercel dashboard** (Project → Settings → Environment Variables):
+
+    - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `ENVIRONMENT=production`, `SITE_URL`, `CMS_ORIGIN` (see the Cloudflare section for the exact meaning).
+
+4. Build with the Vercel Astro adapter:
+
+    ```js
+    import { defineConfig } from "astro/config";
+    import vercel from "@astrojs/vercel/serverless"; // or `@astrojs/vercel/edge`
+    import sveltia from "astro-sveltia-pages";
+
+    export default defineConfig({
+        site: "https://example.com",
+        adapter: vercel(),
+        integrations: [
+            sveltia({
+                repo: "my-org/my-site",
+                platform: "vercel",
+                collections: [
+                    /* … */
+                ],
+            }),
+        ],
+    });
+    ```
+
+The Vercel adapter reads the client IP from the platform-set `x-vercel-forwarded-for` / `x-vercel-ip` headers (trusted, not forgeable by the client).
+
+#### Netlify
+
+Netlify Edge Functions run on the Deno runtime and expose env through `context.env`, the global `Netlify.env` object, and `process.env`. The auth function lives in `netlify/edge-functions/auth.js`.
+
+1. Run the init command with the Netlify flag:
+
+    ```bash
+    pnpm exec astro-sveltia-pages init --platform netlify --site-url https://example.com
+    ```
+
+2. Create a GitHub OAuth App at <https://github.com/settings/developers> with the callback URL `https://{your-netlify-domain}/auth`.
+
+3. Declare the edge function in `netlify.toml`:
+
+    ```toml
+    [[edge_functions]]
+    path = "/auth"
+    function = "auth"
+    ```
+
+4. Set the environment variables in the **Netlify dashboard** (Site → Site configuration → Environment variables): same five variables as Cloudflare.
+
+5. Build with the Netlify Astro adapter:
+
+    ```js
+    import { defineConfig } from "astro/config";
+    import netlify from "@astrojs/netlify";
+    import sveltia from "astro-sveltia-pages";
+
+    export default defineConfig({
+        site: "https://example.com",
+        adapter: netlify(),
+        integrations: [
+            sveltia({
+                repo: "my-org/my-site",
+                platform: "netlify",
+                collections: [
+                    /* … */
+                ],
+            }),
+        ],
+    });
+    ```
+
+The Netlify adapter reads the client IP from `context.ip` / `context.geo.ip` (runtime-set, trusted); the `x-forwarded-for` header is deliberately ignored to prevent rate-limit key forgery.
+
+#### Deno Deploy
+
+Deno Deploy runs on the Deno runtime and exposes env through `Deno.env.get()`. The auth function lives in `serve.js` at the project root.
+
+1. Run the init command with the Deno flag:
+
+    ```bash
+    pnpm exec astro-sveltia-pages init --platform deno --site-url https://example.com
+    ```
+
+    This copies the Deno template to `serve.js`. The template is a no-op on non-Deno runtimes, so it is safe to keep in a shared codebase.
+
+2. Create a GitHub OAuth App at <https://github.com/settings/developers> with the callback URL `https://{your-deno-deploy-domain}/auth`.
+
+3. Set the environment variables in the **Deno Deploy dashboard** (Project → Settings → Environment Variables): same five variables as Cloudflare.
+
+4. Point Deno Deploy at `serve.js` (either via the dashboard entry setting or `deno run --allow-net --allow-env serve.js`).
+
+> ⚠️ **Deno Deploy IP caveat:** Deno Deploy does not expose a trusted, runtime-set client IP. The adapter falls back to the `x-forwarded-for` header, which a client can forge. This is the same trade-off every Deno Deploy OAuth proxy makes, but it means the per-IP rate limit is weaker on this platform than on Cloudflare, EdgeOne, Vercel or Netlify. Consider tightening `rateLimit` (see `createAuthHandler`) if you need a stricter bound.
+
 #### Hosting the auth endpoint yourself
 
 The platform adapters and the OAuth handler are exported by the package, so you can host the auth endpoint yourself:
@@ -269,9 +377,9 @@ import { onRequest } from "astro-sveltia-pages/functions/edgeone";
 export { onRequest };
 ```
 
-`astro-sveltia-pages/functions` (stable API) exports `createAuthHandler()`, `signState()`, `verifyState()` and the `PlatformAdapter` types. Pass `platform: "cloudflare" | "edgeone" | "auto"` to pin or auto-detect the platform per request.
+`astro-sveltia-pages/functions` (stable API) exports `createAuthHandler()`, `signState()`, `verifyState()` and the `PlatformAdapter` types. Pass `platform: "cloudflare" | "edgeone" | "vercel" | "netlify" | "deno" | "auto"` to pin or auto-detect the platform per request.
 
-The lower-level pieces — the platform adapters (`cloudflareAdapter`, `edgeoneAdapter`, `autoAdapter`, `detectAdapter`), the crypto helpers (`hmacSha256Hex`, `timingSafeEqual`), `createRateLimiter()` and `normalizeContext()` — live in `astro-sveltia-pages/functions/internal`. They are **not** part of the stable API and may change in any release; only import them if you need to build a custom adapter or handler.
+The lower-level pieces — the platform adapters (`cloudflareAdapter`, `edgeoneAdapter`, `vercelAdapter`, `netlifyAdapter`, `denoAdapter`, `autoAdapter`, `detectAdapter`), the crypto helpers (`hmacSha256Hex`, `timingSafeEqual`), `createRateLimiter()` and `normalizeContext()` — live in `astro-sveltia-pages/functions/internal`. They are **not** part of the stable API and may change in any release; only import them if you need to build a custom adapter or handler.
 
 ### Cloudflare R2 Media Storage
 

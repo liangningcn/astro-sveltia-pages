@@ -2,9 +2,12 @@
 
 import type { PlatformAdapter, PlatformContext } from "../../src/functions/adapter.ts";
 import { cloudflareAdapter } from "../../src/functions/cloudflare.ts";
+import { denoAdapter } from "../../src/functions/deno.ts";
 import { edgeoneAdapter } from "../../src/functions/edgeone.ts";
 import { createAuthHandler } from "../../src/functions/handler.ts";
+import { netlifyAdapter } from "../../src/functions/netlify.ts";
 import { signState } from "../../src/functions/state.ts";
+import { vercelAdapter } from "../../src/functions/vercel.ts";
 
 const CLIENT_ID = "client-id";
 const CLIENT_SECRET = "client-secret";
@@ -59,6 +62,58 @@ function createEdgeOneContext(
     };
 }
 
+function createVercelContext(
+    url: string,
+    options: ContextOptions = {},
+): PlatformContext {
+    const headers: Record<string, string> = {
+        "x-vercel-forwarded-for": options.clientIp ?? "198.51.100.9",
+        ...options.headers,
+    };
+
+    return {
+        request: createRequest(url, { ...options, headers }),
+        env: {
+            GITHUB_CLIENT_ID: CLIENT_ID,
+            GITHUB_CLIENT_SECRET: CLIENT_SECRET,
+            ...options.env,
+        },
+    };
+}
+
+function createNetlifyContext(
+    url: string,
+    options: ContextOptions = {},
+): PlatformContext {
+    return {
+        request: createRequest(url, options),
+        env: {
+            GITHUB_CLIENT_ID: CLIENT_ID,
+            GITHUB_CLIENT_SECRET: CLIENT_SECRET,
+            ...options.env,
+        },
+        site: { url: "https://example.com" },
+        ip: options.clientIp ?? "198.51.100.10",
+        geo: { ip: options.clientIp ?? "198.51.100.10" },
+    };
+}
+
+function createDenoContext(url: string, options: ContextOptions = {}): PlatformContext {
+    const headers: Record<string, string> = {
+        "x-forwarded-for": options.clientIp ?? "203.0.113.44",
+        ...options.headers,
+    };
+
+    return {
+        request: createRequest(url, { ...options, headers }),
+        env: {
+            GITHUB_CLIENT_ID: CLIENT_ID,
+            GITHUB_CLIENT_SECRET: CLIENT_SECRET,
+            ...options.env,
+        },
+    };
+}
+
 const PLATFORMS: {
     name: string;
     adapter: PlatformAdapter;
@@ -70,6 +125,9 @@ const PLATFORMS: {
         createContext: createCloudflareContext,
     },
     { name: "edgeone", adapter: edgeoneAdapter, createContext: createEdgeOneContext },
+    { name: "vercel", adapter: vercelAdapter, createContext: createVercelContext },
+    { name: "netlify", adapter: netlifyAdapter, createContext: createNetlifyContext },
+    { name: "deno", adapter: denoAdapter, createContext: createDenoContext },
 ];
 
 function createFetchMock(payload: Record<string, unknown>): typeof fetch {
@@ -260,7 +318,7 @@ describe("createAuthHandler - rate limiting", () => {
 });
 
 describe("createAuthHandler - platform parity", () => {
-    it("produces the same redirect on both platforms", async () => {
+    it("produces the same redirect on every platform", async () => {
         const locations = await Promise.all(
             PLATFORMS.map(async ({ adapter, createContext }) => {
                 const handler = createAuthHandler({
@@ -278,10 +336,13 @@ describe("createAuthHandler - platform parity", () => {
             }),
         );
 
-        expect(locations[0]).toBe(locations[1]);
+        // Every platform must produce the same authorize URL.
+        for (const loc of locations) {
+            expect(loc).toBe(locations[0]);
+        }
     });
 
-    it("produces the same token handover on both platforms", async () => {
+    it("produces the same token handover on every platform", async () => {
         const pages = await Promise.all(
             PLATFORMS.map(async ({ adapter, createContext }) => {
                 const handler = createAuthHandler({
@@ -293,6 +354,12 @@ describe("createAuthHandler - platform parity", () => {
                 const response = await handler(
                     createContext(
                         `https://example.com/auth?code=oauth-code&state=${encodeURIComponent(state)}`,
+                        {
+                            env: {
+                                SITE_URL: "https://example.com",
+                                CMS_ORIGIN: "https://example.com",
+                            },
+                        },
                     ),
                 );
 
@@ -300,6 +367,8 @@ describe("createAuthHandler - platform parity", () => {
             }),
         );
 
-        expect(pages[0]).toBe(pages[1]);
+        for (const page of pages) {
+            expect(page).toBe(pages[0]);
+        }
     });
 });

@@ -24,7 +24,8 @@ function getOrigin(context: PlatformContext, url: URL): string {
  * Cloudflare Pages adapter.
  *
  * Environment variables come from `context.env`, the client IP from the
- * `CF-Connecting-IP` header that Cloudflare sets on every request.
+ * `CF-Connecting-IP` header that Cloudflare sets on every request. The
+ * optional `context` parameter of {@link getClientIp} is ignored.
  */
 export const cloudflareAdapter: PlatformAdapter = {
     name: "cloudflare",

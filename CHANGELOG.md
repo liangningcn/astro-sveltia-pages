@@ -10,6 +10,46 @@ section below.
 
 ---
 
+## 0.6.2
+
+### Added
+
+- **OAuth proxy support for Vercel, Netlify and Deno Deploy.** The auth
+  function now ships platform-specific entry templates for all five supported
+  runtimes. The `init` command gains three new `--platform` values:
+
+    - `vercel` → `api/auth.js` (Vercel Edge Function, `process.env`, client IP
+      from `x-vercel-forwarded-for` / `x-vercel-ip`).
+    - `netlify` → `netlify/edge-functions/auth.js` (Netlify Edge Function,
+      `context.env` / `Netlify.env` / `process.env`, client IP from
+      `context.ip` / `context.geo.ip`; `x-forwarded-for` is deliberately
+      ignored).
+    - `deno` → `serve.js` at the project root (Deno Deploy, `Deno.env.get()`,
+      client IP from `x-forwarded-for` with the documented caveat that Deno
+      Deploy exposes no trusted runtime IP).
+
+    The auto-detecting `auth.js` template (Cloudflare + EdgeOne) is unchanged.
+    Platform detection priority (most specific first): EdgeOne (`request.eo`)
+    → Netlify (`Netlify` global / `context.site` / `context.ip` / `context.geo`)
+    → Deno (`Deno` global) → Vercel (`x-vercel-*` headers) → Cloudflare
+    (`CF-Connecting-IP`) → Cloudflare fallback.
+
+    The `PlatformAdapter.getClientIp` signature now accepts an optional
+    `PlatformContext` so Netlify can read the IP from the runtime context
+    instead of a forgeable header. Existing adapters ignore the new parameter.
+
+### Migration
+
+- No breaking changes for existing Cloudflare / EdgeOne deployments. The
+  `auth.js` template and its `onRequest(context, env)` entry shape are
+  unchanged; only the new platform templates (`vercel-auth.js`,
+  `netlify-auth.js`, `deno-auth.js`) are added.
+- The `platform` option / `--platform` flag now accepts `vercel`, `netlify`
+  and `deno` in addition to `cloudflare` and `edgeone`.
+- The i18n template version stamp is bumped to `0.6.2`; re-run
+  `pnpm exec astro-sveltia-pages init:i18n` in each consumer repo and commit
+  the three regenerated snapshots.
+
 ## 0.6.1
 
 ### Fixed

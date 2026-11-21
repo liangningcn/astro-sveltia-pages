@@ -21,6 +21,9 @@ describe("public export surface", () => {
             "readEnvValue",
             "cloudflareAdapter",
             "edgeoneAdapter",
+            "vercelAdapter",
+            "netlifyAdapter",
+            "denoAdapter",
             "normalizeContext",
         ];
 
@@ -36,6 +39,9 @@ describe("public export surface", () => {
         expect(typeof internal.createRateLimiter).toBe("function");
         expect(typeof internal.cloudflareAdapter).toBe("object");
         expect(typeof internal.edgeoneAdapter).toBe("object");
+        expect(typeof internal.vercelAdapter).toBe("object");
+        expect(typeof internal.netlifyAdapter).toBe("object");
+        expect(typeof internal.denoAdapter).toBe("object");
         expect(typeof internal.normalizeContext).toBe("function");
     });
 });

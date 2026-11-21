@@ -39,13 +39,15 @@ import { LOG_PREFIX } from "./options.js";
 export { I18N_GENERATED_FILES, I18N_TEMPLATE_VERSION } from "./i18n-template-check.js";
 
 /** Deployment platforms the OAuth proxy can be deployed to. */
-export type InitPlatform = "cloudflare" | "edgeone";
+export type InitPlatform = "cloudflare" | "edgeone" | "vercel" | "netlify" | "deno";
 
 type PlatformDescriptor = {
     /** Human readable platform name. */
     label: string;
     /** Template path relative to the package root. */
     template: string;
+    /** File name written into the project (relative to `dir`). */
+    fileName: string;
     /** Directory the function is copied into, relative to the project root. */
     dir: string;
     /** Where the environment variables are configured. */
@@ -58,6 +60,7 @@ const PLATFORMS: Record<InitPlatform, PlatformDescriptor> = {
     cloudflare: {
         label: "Cloudflare Pages",
         template: "templates/auth.js",
+        fileName: "auth.js",
         dir: "functions",
         envHint: "the Cloudflare Pages dashboard (Settings -> Environment variables)",
         siteHint: "the Cloudflare Pages dashboard",
@@ -65,14 +68,49 @@ const PLATFORMS: Record<InitPlatform, PlatformDescriptor> = {
     edgeone: {
         label: "EdgeOne Pages",
         template: "templates/auth.js",
+        fileName: "auth.js",
         dir: "edge-functions",
         envHint:
             "the EdgeOne Pages dashboard (Project settings -> Environment variables)",
         siteHint: "the EdgeOne Pages dashboard",
     },
+    vercel: {
+        label: "Vercel",
+        template: "templates/vercel-auth.js",
+        fileName: "auth.js",
+        dir: "api",
+        envHint: "the Vercel dashboard (Project -> Settings -> Environment Variables)",
+        siteHint: "the Vercel dashboard",
+    },
+    netlify: {
+        label: "Netlify",
+        template: "templates/netlify-auth.js",
+        fileName: "auth.js",
+        dir: "netlify/edge-functions",
+        envHint:
+            "the Netlify dashboard (Site -> Site configuration -> Environment variables)",
+        siteHint: "the Netlify dashboard",
+    },
+    deno: {
+        label: "Deno Deploy",
+        template: "templates/deno-auth.js",
+        fileName: "serve.js",
+        dir: ".",
+        envHint:
+            "the Deno Deploy dashboard (Project -> Settings -> Environment Variables)",
+        siteHint: "the Deno Deploy dashboard",
+    },
 };
 
 const DEFAULT_PLATFORM: InitPlatform = "cloudflare";
+
+const KNOWN_PLATFORMS: ReadonlySet<string> = new Set([
+    "cloudflare",
+    "edgeone",
+    "vercel",
+    "netlify",
+    "deno",
+]);
 
 const GITHUB_OAUTH_APPS_URL = "https://github.com/settings/developers";
 
@@ -171,11 +209,13 @@ function readPlatformFromArgs(args: string[]): InitPlatform {
         return DEFAULT_PLATFORM;
     }
 
-    if (value !== "cloudflare" && value !== "edgeone") {
-        fail(`unknown --platform "${value}" (expected "cloudflare" or "edgeone").`);
+    if (!KNOWN_PLATFORMS.has(value)) {
+        fail(
+            `unknown --platform "${value}" (expected one of cloudflare, edgeone, vercel, netlify, deno).`,
+        );
     }
 
-    return value;
+    return value as InitPlatform;
 }
 
 function hasEnvKey(content: string, key: string): boolean {
@@ -233,8 +273,8 @@ function copyAuthTemplate(platform: InitPlatform, cwd: string): void {
         );
     }
 
-    const functionsDir = join(cwd, descriptor.dir);
-    const target = join(functionsDir, "auth.js");
+    const functionsDir = descriptor.dir === "." ? cwd : join(cwd, descriptor.dir);
+    const target = join(functionsDir, descriptor.fileName);
 
     if (existsSync(target)) {
         console.error(`${LOG_PREFIX} ${target} already exists, skipping.`);
@@ -941,7 +981,7 @@ function readPackageVersion(): string {
 
 const CLI_USAGE = `
 ${LOG_PREFIX} Usage:
-  astro-sveltia-pages init [--platform cloudflare|edgeone] [--site-url <url>]
+  astro-sveltia-pages init [--platform cloudflare|edgeone|vercel|netlify|deno] [--site-url <url>]
   astro-sveltia-pages init:i18n [--config <path>] [--content-root <path>]
                                 [--default-locale <lang>] [--locales <list>]
                                 [--project-name <name>]
@@ -959,6 +999,14 @@ Commands:
 Flags:
   --help, -h      Print this usage and exit.
   --version, -v   Print the package version and exit.
+  --platform      Deployment platform for the OAuth proxy:
+                    cloudflare (default) -> functions/auth.js
+                    edgeone              -> edge-functions/auth.js
+                    vercel               -> api/auth.js
+                    netlify              -> netlify/edge-functions/auth.js
+                    deno                 -> serve.js (project root)
+  --site-url      Production site origin, used to print the exact OAuth
+                  callback URL and admin URL in the next steps.
   --locales       Comma-separated target locales for init:i18n; overrides both
                   the Sveltia config and on-disk language detection.
   --postinstall   Hook mode for package.json postinstall: no-op when i18n is not

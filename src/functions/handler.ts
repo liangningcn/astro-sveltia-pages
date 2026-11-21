@@ -247,7 +247,7 @@ export function createAuthHandler(options: AuthHandlerOptions = {}): AuthHandler
             );
         }
 
-        const clientIp = resolvedAdapter.getClientIp(request);
+        const clientIp = resolvedAdapter.getClientIp(request, context);
 
         if (limiter && !limiter.hit(clientIp, now())) {
             return jsonResponse({ error: "Too many requests" }, 429);

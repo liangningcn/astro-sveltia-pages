@@ -2,11 +2,11 @@
 
 [English](README.md) | 中文文档
 
-Sveltia CMS 与 Astro 深度集成，**无需手写任何 CMS 配置**。专为 Cloudflare Pages 与 EdgeOne Pages 打造。
+Sveltia CMS 与 Astro 深度集成，**无需手写任何 CMS 配置**。专为 Cloudflare Pages、EdgeOne Pages、Vercel、Netlify 与 Deno Deploy 打造。
 
 - **一个配置对象 → 一套 CMS 后台。** 只需一次 `sveltia({ ... })` 调用，即可在构建产物中生成 `/admin/index.html` 与 `/admin/config.yml`。
 - **外部媒体库。** 自动配置 Sveltia 的 Cloudflare R2 外部媒体库，密钥在 CMS 界面中输入（绝不写入磁盘）。
-- **生产级 OAuth。** 直接提供真实部署所用的 GitHub OAuth 边缘函数，同时支持 Cloudflare Pages（`functions/auth.js`）与 EdgeOne Pages（`edge-functions/auth.js`），并附带一键 `init` 命令完成接入。
+- **生产级 OAuth。** 直接提供真实部署所用的 GitHub OAuth 边缘函数，支持 Cloudflare Pages（`functions/auth.js`）、EdgeOne Pages（`edge-functions/auth.js`）、Vercel（`api/auth.js`）、Netlify（`netlify/edge-functions/auth.js`）与 Deno Deploy（`serve.js`），并附带一键 `init` 命令完成接入。
 - **带类型的 Content Loader。** `astro-sveltia-pages/loader` 读取生成的配置，自动生成 Zod schema 加载内容。
 
 ## 目录
@@ -110,34 +110,34 @@ astro build
 
 ### 配置项参考
 
-| 配置项              | 类型                        | 默认值                 | 说明                                                                                                      |
-| ------------------- | --------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
-| `repo`              | `string`                    | —                      | GitHub 仓库，格式 `owner/name`。必填。                                                                    |
-| `branch`            | `string`                    | `"main"`               | CMS 提交更改的分支。                                                                                      |
-| `siteUrl`           | `string`                    | Astro `site`           | 用作 CMS `base_url` 的源站地址。两者都未设置时构建会失败。                                                |
-| `collections`       | `SveltiaCollection[]`       | —                      | 1:1 映射到 CMS 配置。必填。                                                                               |
-| `r2`                | `object`                    | —                      | Cloudflare R2 外部媒体库（见[媒体存储](#cloudflare-r2-媒体存储)）。                                       |
-| `mediaFolder`       | `string`                    | `"public/images"`      | CMS `media_folder`。                                                                                      |
-| `publicFolder`      | `string`                    | `"/images"`            | CMS `public_folder`。                                                                                     |
-| `appTitle`          | `string`                    | `"Sveltia CMS"`        | 浏览器标签 / 登录页标题。                                                                                 |
-| `logo`              | `{ src, ... }`              | —                      | CMS 徽标，转发为 `logo`。                                                                                 |
-| `backendName`       | `string`                    | `"github"`             | Git 后端名称。                                                                                            |
-| `sveltiaVersion`    | `string`                    | `"0.270.0"`            | 从 unpkg 加载的 Sveltia 版本，**已锁定**以保证可复现（此前为 `"latest"`）。仅在有意升级时覆盖。           |
-| `extraConfig`       | `object`                    | —                      | 逃生通道，浅合并进生成的配置。与生成值冲突的键会覆盖生成值，并对每个冲突键输出一条警告。                  |
-| `platform`          | `"cloudflare" \| "edgeone"` | `"cloudflare"`         | OAuth 代理的部署平台。决定函数模板以及配置环境变量的后台。                                                |
-| `singletons`        | `unknown[]`                 | —                      | 单文件配置，转发为 `singletons`。                                                                         |
-| `assetCollections`  | `unknown[]`                 | —                      | 资产集合，转发为 `asset_collections`。                                                                    |
-| `i18n`              | `object`                    | —                      | 全局 i18n 选项，转发为 `i18n`。                                                                           |
-| `readonly`          | `boolean`                   | `false`                | 将整个 CMS 设为只读，转发为 `readonly`。                                                                  |
-| `showPreviewLinks`  | `boolean`                   | —（Sveltia：`true`）   | 是否显示线上 / 预览环境链接；**仅在设置时**转发为 `show_preview_links`。                                  |
-| `displayUrl`        | `string`                    | —                      | UI 中跳转的地址，转发为 `display_url`。                                                                   |
-| `logoutRedirectUrl` | `string`                    | —                      | 登出后跳转地址，转发为 `logout_redirect_url`。                                                            |
-| `editor`            | `object`                    | —                      | 编辑器视图选项，转发为 `editor`。                                                                         |
-| `publishMode`       | `string \| object`          | —（Sveltia：`simple`） | 发布模式，**仅在设置时**转发为 `publish_mode`。                                                           |
-| `fieldDefaults`     | `object`                    | —                      | 字段默认选项，转发为 `field_defaults`。                                                                   |
-| `output`            | `object`                    | —                      | 数据输出选项，转发为 `output`。                                                                           |
-| `slug`              | `object`                    | —                      | 条目与资产的 slug 选项，转发为 `slug`。Sveltia 已废弃集合级 `slug_length`，请改用 `slug: { maxlength }`。 |
-| `logoUrl`           | `string`                    | —                      | 入口页 / favicon 徽标地址，转发为 `logo: { src }`（Sveltia 已废弃 `logo_url` 键；本选项名保持不变）。     |
+| 配置项              | 类型                                                           | 默认值                 | 说明                                                                                                      |
+| ------------------- | -------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `repo`              | `string`                                                       | —                      | GitHub 仓库，格式 `owner/name`。必填。                                                                    |
+| `branch`            | `string`                                                       | `"main"`               | CMS 提交更改的分支。                                                                                      |
+| `siteUrl`           | `string`                                                       | Astro `site`           | 用作 CMS `base_url` 的源站地址。两者都未设置时构建会失败。                                                |
+| `collections`       | `SveltiaCollection[]`                                          | —                      | 1:1 映射到 CMS 配置。必填。                                                                               |
+| `r2`                | `object`                                                       | —                      | Cloudflare R2 外部媒体库（见[媒体存储](#cloudflare-r2-媒体存储)）。                                       |
+| `mediaFolder`       | `string`                                                       | `"public/images"`      | CMS `media_folder`。                                                                                      |
+| `publicFolder`      | `string`                                                       | `"/images"`            | CMS `public_folder`。                                                                                     |
+| `appTitle`          | `string`                                                       | `"Sveltia CMS"`        | 浏览器标签 / 登录页标题。                                                                                 |
+| `logo`              | `{ src, ... }`                                                 | —                      | CMS 徽标，转发为 `logo`。                                                                                 |
+| `backendName`       | `string`                                                       | `"github"`             | Git 后端名称。                                                                                            |
+| `sveltiaVersion`    | `string`                                                       | `"0.270.0"`            | 从 unpkg 加载的 Sveltia 版本，**已锁定**以保证可复现（此前为 `"latest"`）。仅在有意升级时覆盖。           |
+| `extraConfig`       | `object`                                                       | —                      | 逃生通道，浅合并进生成的配置。与生成值冲突的键会覆盖生成值，并对每个冲突键输出一条警告。                  |
+| `platform`          | `"cloudflare" \| "edgeone" \| "vercel" \| "netlify" \| "deno"` | `"cloudflare"`         | OAuth 代理的部署平台。决定函数模板以及配置环境变量的后台。                                                |
+| `singletons`        | `unknown[]`                                                    | —                      | 单文件配置，转发为 `singletons`。                                                                         |
+| `assetCollections`  | `unknown[]`                                                    | —                      | 资产集合，转发为 `asset_collections`。                                                                    |
+| `i18n`              | `object`                                                       | —                      | 全局 i18n 选项，转发为 `i18n`。                                                                           |
+| `readonly`          | `boolean`                                                      | `false`                | 将整个 CMS 设为只读，转发为 `readonly`。                                                                  |
+| `showPreviewLinks`  | `boolean`                                                      | —（Sveltia：`true`）   | 是否显示线上 / 预览环境链接；**仅在设置时**转发为 `show_preview_links`。                                  |
+| `displayUrl`        | `string`                                                       | —                      | UI 中跳转的地址，转发为 `display_url`。                                                                   |
+| `logoutRedirectUrl` | `string`                                                       | —                      | 登出后跳转地址，转发为 `logout_redirect_url`。                                                            |
+| `editor`            | `object`                                                       | —                      | 编辑器视图选项，转发为 `editor`。                                                                         |
+| `publishMode`       | `string \| object`                                             | —（Sveltia：`simple`） | 发布模式，**仅在设置时**转发为 `publish_mode`。                                                           |
+| `fieldDefaults`     | `object`                                                       | —                      | 字段默认选项，转发为 `field_defaults`。                                                                   |
+| `output`            | `object`                                                       | —                      | 数据输出选项，转发为 `output`。                                                                           |
+| `slug`              | `object`                                                       | —                      | 条目与资产的 slug 选项，转发为 `slug`。Sveltia 已废弃集合级 `slug_length`，请改用 `slug: { maxlength }`。 |
+| `logoUrl`           | `string`                                                       | —                      | 入口页 / favicon 徽标地址，转发为 `logo: { src }`（Sveltia 已废弃 `logo_url` 键；本选项名保持不变）。     |
 
 `collections` 条目必须包含 `name`、`folder` 和 `fields`；其余所有 Sveltia 集合选项（`create`、集合级 `slug`、`i18n`、`media_folder` 等）原样透传。
 
@@ -152,7 +152,7 @@ astro build
 
 ### 身份认证（GitHub OAuth）
 
-本包不自行托管 OAuth 端点，而是直接提供真实部署所用的边缘函数。OAuth 逻辑（state 签名、令牌交换、`postMessage` 回传）与平台无关，只有运行时访问器不同，因此同一套实现可在 Cloudflare Pages 与 EdgeOne Pages 上运行。
+本包不自行托管 OAuth 端点，而是直接提供真实部署所用的边缘函数。OAuth 逻辑（state 签名、令牌交换、`postMessage` 回传）与平台无关，只有运行时访问器不同，因此同一套实现可在 Cloudflare Pages、EdgeOne Pages、Vercel、Netlify 与 Deno Deploy 上运行。`init` 命令生成的模板会按请求自动判定平台，单一代码包即可服务全部已支持平台。
 
 > **安全说明：** 自 0.3.0 起，GitHub 令牌**仅**回传至配置的 `CMS_ORIGIN`（`https`，本地开发可为 `http://localhost`）—— 绝不会回传至 `"*"`。打开认证弹窗的攻击页面无法接收该令牌。接收方 CMS 仍须校验 `event.origin === CMS_ORIGIN`。`CMS_ORIGIN` 为**必填**项；缺失或无效时认证端点返回 `500`。
 
@@ -246,6 +246,112 @@ EdgeOne Pages 的部署流程相同，只有两处差异：函数位于 `edge-fu
 
 若 EdgeOne 上无法确定 IP，限流便会退化为针对这些请求的全局限流。请保持 `ENVIRONMENT=production`，使 CORS 预检只应答你自己的源站。
 
+#### Vercel
+
+Vercel Edge Functions 运行于 V8 运行时，环境变量通过 `process.env` 读取。认证函数位于 `api/auth.js`。
+
+1. 运行 init 命令并指定 Vercel 平台：
+
+    ```bash
+    pnpm exec astro-sveltia-pages init --platform vercel --site-url https://example.com
+    ```
+
+    该命令将 Vercel 模板复制到 `api/auth.js`，并向 `.env.example` 写入相同的环境变量。
+
+2. 在 <https://github.com/settings/developers> 创建 GitHub OAuth App，回调地址填 `https://{你的-vercel 域名}/auth`。
+
+3. 在 **Vercel 控制台**（Project → Settings → Environment Variables）配置环境变量：`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`ENVIRONMENT=production`、`SITE_URL`、`CMS_ORIGIN`（含义同 Cloudflare 章节）。
+
+4. 使用 Vercel Astro 适配器构建：
+
+    ```js
+    import { defineConfig } from "astro/config";
+    import vercel from "@astrojs/vercel/serverless"; // 或 `@astrojs/vercel/edge`
+    import sveltia from "astro-sveltia-pages";
+
+    export default defineConfig({
+        site: "https://example.com",
+        adapter: vercel(),
+        integrations: [
+            sveltia({
+                repo: "my-org/my-site",
+                platform: "vercel",
+                collections: [
+                    /* … */
+                ],
+            }),
+        ],
+    });
+    ```
+
+Vercel 适配器从平台设置的 `x-vercel-forwarded-for` / `x-vercel-ip` 请求头读取客户端 IP（可信，客户端无法伪造）。
+
+#### Netlify
+
+Netlify Edge Functions 运行于 Deno 运行时，环境变量通过 `context.env`、全局 `Netlify.env` 对象以及 `process.env` 读取。认证函数位于 `netlify/edge-functions/auth.js`。
+
+1. 运行 init 命令并指定 Netlify 平台：
+
+    ```bash
+    pnpm exec astro-sveltia-pages init --platform netlify --site-url https://example.com
+    ```
+
+2. 在 <https://github.com/settings/developers> 创建 GitHub OAuth App，回调地址填 `https://{你的-netlify 域名}/auth`。
+
+3. 在 `netlify.toml` 中声明 edge function：
+
+    ```toml
+    [[edge_functions]]
+    path = "/auth"
+    function = "auth"
+    ```
+
+4. 在 **Netlify 控制台**（Site → Site configuration → Environment variables）配置环境变量：与 Cloudflare 相同的五项。
+
+5. 使用 Netlify Astro 适配器构建：
+
+    ```js
+    import { defineConfig } from "astro/config";
+    import netlify from "@astrojs/netlify";
+    import sveltia from "astro-sveltia-pages";
+
+    export default defineConfig({
+        site: "https://example.com",
+        adapter: netlify(),
+        integrations: [
+            sveltia({
+                repo: "my-org/my-site",
+                platform: "netlify",
+                collections: [
+                    /* … */
+                ],
+            }),
+        ],
+    });
+    ```
+
+Netlify 适配器从 `context.ip` / `context.geo.ip` 读取客户端 IP（运行时设置，可信）；故意忽略 `x-forwarded-for` 请求头以防限流键被伪造。
+
+#### Deno Deploy
+
+Deno Deploy 运行于 Deno 运行时，环境变量通过 `Deno.env.get()` 读取。认证函数位于项目根目录的 `serve.js`。
+
+1. 运行 init 命令并指定 Deno 平台：
+
+    ```bash
+    pnpm exec astro-sveltia-pages init --platform deno --site-url https://example.com
+    ```
+
+    该命令将 Deno 模板复制到 `serve.js`。该模板在非 Deno 运行时下是空操作，因此可安全保留在共享代码库中。
+
+2. 在 <https://github.com/settings/developers> 创建 GitHub OAuth App，回调地址填 `https://{你的-deno-deploy 域名}/auth`。
+
+3. 在 **Deno Deploy 控制台**（Project → Settings → Environment Variables）配置环境变量：与 Cloudflare 相同的五项。
+
+4. 在 Deno Deploy 中将入口指向 `serve.js`（通过控制台入口设置或 `deno run --allow-net --allow-env serve.js`）。
+
+> ⚠️ **Deno Deploy IP 注意事项：** Deno Deploy 不暴露可信的运行时客户端 IP。适配器回退至 `x-forwarded-for` 请求头，而该请求头可被客户端伪造。这是所有 Deno Deploy OAuth 代理都面临的取舍，但意味着该平台上的按 IP 限流弱于 Cloudflare、EdgeOne、Vercel 或 Netlify。如需更严格的限制，请收紧 `rateLimit`（见 `createAuthHandler`）。
+
 #### 自行托管认证端点
 
 平台适配器与 OAuth 处理器均由本包导出，因此你可以自行托管认证端点：
@@ -264,9 +370,9 @@ import { onRequest } from "astro-sveltia-pages/functions/edgeone";
 export { onRequest };
 ```
 
-`astro-sveltia-pages/functions`（稳定 API）导出 `createAuthHandler()`、`signState()`、`verifyState()` 以及 `PlatformAdapter` 类型。传入 `platform: "cloudflare" | "edgeone" | "auto"` 可固定或按请求自动检测平台。
+`astro-sveltia-pages/functions`（稳定 API）导出 `createAuthHandler()`、`signState()`、`verifyState()` 以及 `PlatformAdapter` 类型。传入 `platform: "cloudflare" | "edgeone" | "vercel" | "netlify" | "deno" | "auto"` 可固定或按请求自动检测平台。
 
-更底层的组成部分 —— 平台适配器（`cloudflareAdapter`、`edgeoneAdapter`、`autoAdapter`、`detectAdapter`）、加密辅助函数（`hmacSha256Hex`、`timingSafeEqual`）、`createRateLimiter()` 与 `normalizeContext()` —— 位于 `astro-sveltia-pages/functions/internal`。它们**不属于**稳定 API，可能在任意版本中变动；仅当你需要构建自定义适配器或处理器时才导入它们。
+更底层的组成部分 —— 平台适配器（`cloudflareAdapter`、`edgeoneAdapter`、`vercelAdapter`、`netlifyAdapter`、`denoAdapter`、`autoAdapter`、`detectAdapter`）、加密辅助函数（`hmacSha256Hex`、`timingSafeEqual`）、`createRateLimiter()` 与 `normalizeContext()` —— 位于 `astro-sveltia-pages/functions/internal`。它们**不属于**稳定 API，可能在任意版本中变动；仅当你需要构建自定义适配器或处理器时才导入它们。
 
 ### Cloudflare R2 媒体存储
 

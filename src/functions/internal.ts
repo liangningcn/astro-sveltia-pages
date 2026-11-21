@@ -8,7 +8,10 @@
  */
 export { UNKNOWN_CLIENT_IP, readEnvValue, resolveSiteOrigin } from "./adapter.js";
 export { cloudflareAdapter } from "./cloudflare.js";
+export { denoAdapter } from "./deno.js";
 export { edgeoneAdapter, type EdgeOneRequest } from "./edgeone.js";
+export { netlifyAdapter } from "./netlify.js";
+export { vercelAdapter } from "./vercel.js";
 export { adapterFor, autoAdapter, detectAdapter, resolveAdapter } from "./detect.js";
 export { normalizeContext } from "./context.js";
 export {

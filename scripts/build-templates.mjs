@@ -27,6 +27,24 @@ const TARGETS = [
         outDir: "templates",
         target: "auth.js",
     },
+    {
+        platform: "Vercel Edge Functions",
+        entry: "src/functions/entries/vercel.ts",
+        outDir: "templates",
+        target: "vercel-auth.js",
+    },
+    {
+        platform: "Netlify Edge Functions",
+        entry: "src/functions/entries/netlify.ts",
+        outDir: "templates",
+        target: "netlify-auth.js",
+    },
+    {
+        platform: "Deno Deploy",
+        entry: "src/functions/entries/deno.ts",
+        outDir: "templates",
+        target: "deno-auth.js",
+    },
 ];
 
 // i18n templates shipped as-is (placeholders filled by the init:i18n CLI).
@@ -66,6 +84,8 @@ function banner(target) {
 
 async function buildAuthTemplates() {
     for (const target of TARGETS) {
+        const fileName = target.target.replace(/\.js$/, "");
+
         await build({
             configFile: false,
             root,
@@ -78,12 +98,12 @@ async function buildAuthTemplates() {
                 lib: {
                     entry: join(root, target.entry),
                     formats: ["es"],
-                    fileName: () => "auth.js",
+                    fileName: () => `${fileName}.js`,
                 },
             },
         });
 
-        const file = join(root, target.outDir, "auth.js");
+        const file = join(root, target.outDir, target.target);
         const source = await readFile(file, "utf-8");
         const { code, errors } = await format(file, source, FORMAT_OPTIONS);
 

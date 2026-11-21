@@ -330,14 +330,65 @@ describe("init — EdgeOne Pages", () => {
         const console_ = captureConsole();
 
         try {
-            expect(() => runInit(["--platform", "vercel"], cwd)).toThrow(
+            expect(() => runInit(["--platform", "firebase"], cwd)).toThrow(
                 /process\.exit\(1\)/,
             );
             expect(console_.error.join("\n")).toContain("unknown --platform");
+            expect(console_.error.join("\n")).toContain("cloudflare");
+            expect(console_.error.join("\n")).toContain("deno");
         } finally {
             console_.restore();
             exitSpy.mockRestore();
         }
+    });
+
+    it("creates api/auth.js for --platform vercel", () => {
+        const cwd = makeTempDir();
+        runInit(["--platform", "vercel"], cwd);
+
+        expect(existsSync(join(cwd, "api", "auth.js"))).toBe(true);
+        expect(existsSync(join(cwd, "functions", "auth.js"))).toBe(false);
+    });
+
+    it("creates netlify/edge-functions/auth.js for --platform netlify", () => {
+        const cwd = makeTempDir();
+        runInit(["--platform", "netlify"], cwd);
+
+        expect(existsSync(join(cwd, "netlify", "edge-functions", "auth.js"))).toBe(
+            true,
+        );
+    });
+
+    it("creates serve.js at project root for --platform deno", () => {
+        const cwd = makeTempDir();
+        runInit(["--platform", "deno"], cwd);
+
+        expect(existsSync(join(cwd, "serve.js"))).toBe(true);
+        expect(existsSync(join(cwd, "functions", "auth.js"))).toBe(false);
+    });
+
+    it("documents the Vercel dashboard in .env.example", () => {
+        const cwd = makeTempDir();
+        runInit(["--platform", "vercel"], cwd);
+
+        const content = readFileSync(join(cwd, ".env.example"), "utf-8");
+        expect(content).toContain("Vercel dashboard");
+    });
+
+    it("documents the Netlify dashboard in .env.example", () => {
+        const cwd = makeTempDir();
+        runInit(["--platform", "netlify"], cwd);
+
+        const content = readFileSync(join(cwd, ".env.example"), "utf-8");
+        expect(content).toContain("Netlify dashboard");
+    });
+
+    it("documents the Deno Deploy dashboard in .env.example", () => {
+        const cwd = makeTempDir();
+        runInit(["--platform", "deno"], cwd);
+
+        const content = readFileSync(join(cwd, ".env.example"), "utf-8");
+        expect(content).toContain("Deno Deploy dashboard");
     });
 });
 

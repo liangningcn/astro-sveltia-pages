@@ -66,9 +66,9 @@ export type SveltiaPagesOptions = {
      */
     extraConfig?: Record<string, unknown>;
     /**
-     * Deployment platform of the GitHub OAuth proxy: `cloudflare` (default)
-     * or `edgeone`. It selects the function template and the dashboard the
-     * environment variables are configured in.
+     * Deployment platform of the GitHub OAuth proxy: `cloudflare` (default),
+     * `edgeone`, `vercel`, `netlify` or `deno`. It selects the function
+     * template and the dashboard the environment variables are configured in.
      */
     platform?: PlatformName;
     /**
@@ -292,13 +292,18 @@ export function validateOptions(options: SveltiaPagesOptions): void {
         fail('"extraConfig" must be an object.');
     }
 
-    if (
-        options.platform !== undefined &&
-        options.platform !== "cloudflare" &&
-        options.platform !== "edgeone"
-    ) {
+    const ALLOWED_PLATFORMS: ReadonlySet<string> = new Set([
+        "cloudflare",
+        "edgeone",
+        "vercel",
+        "netlify",
+        "deno",
+    ]);
+
+    if (options.platform !== undefined && !ALLOWED_PLATFORMS.has(options.platform)) {
         fail(
-            `"platform" must be "cloudflare" or "edgeone" (got ${JSON.stringify(options.platform)}).`,
+            `"platform" must be one of cloudflare, edgeone, vercel, netlify, deno ` +
+                `(got ${JSON.stringify(options.platform)}).`,
         );
     }
 

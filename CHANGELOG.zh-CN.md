@@ -8,6 +8,26 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.6.2
+
+### 新增
+
+- **OAuth 代理支持 Vercel、Netlify 与 Deno Deploy。** 认证函数现可为全部五个已支持运行时生成平台专属入口模板。`init` 命令新增三个 `--platform` 取值：
+
+    - `vercel` → `api/auth.js`（Vercel Edge Function，`process.env`，客户端 IP 来自 `x-vercel-forwarded-for` / `x-vercel-ip`）。
+    - `netlify` → `netlify/edge-functions/auth.js`（Netlify Edge Function，`context.env` / `Netlify.env` / `process.env`，客户端 IP 来自 `context.ip` / `context.geo.ip`；故意忽略 `x-forwarded-for`）。
+    - `deno` → 项目根目录 `serve.js`（Deno Deploy，`Deno.env.get()`，客户端 IP 来自 `x-forwarded-for`，并附文档说明 Deno Deploy 不暴露可信运行时 IP 的注意事项）。
+
+    自动检测的 `auth.js` 模板（Cloudflare + EdgeOne）保持不变。平台检测优先级（最具体者优先）：EdgeOne（`request.eo`）→ Netlify（`Netlify` 全局对象 / `context.site` / `context.ip` / `context.geo`）→ Deno（`Deno` 全局对象）→ Vercel（`x-vercel-*` 请求头）→ Cloudflare（`CF-Connecting-IP`）→ Cloudflare 兜底。
+
+    `PlatformAdapter.getClientIp` 签名新增可选的 `PlatformContext` 参数，使 Netlify 能从运行时上下文读取 IP 而非可伪造的请求头。既有适配器忽略该参数。
+
+### 迁移
+
+- 对既有 Cloudflare / EdgeOne 部署无破坏性变更。`auth.js` 模板及其 `onRequest(context, env)` 入口形态不变；仅新增三个平台模板（`vercel-auth.js`、`netlify-auth.js`、`deno-auth.js`）。
+- `platform` 配置项 / `--platform` 标志现在接受 `vercel`、`netlify`、`deno`，原有 `cloudflare`、`edgeone` 保持不变。
+- i18n 模板版本戳升至 `0.6.2`；需在各站点仓库重跑 `pnpm exec astro-sveltia-pages init:i18n` 并提交三份重新生成的快照。
+
 ## 0.6.1
 
 ### 修复
