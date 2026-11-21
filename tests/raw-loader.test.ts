@@ -177,6 +177,26 @@ describe("loadRawCollection", () => {
         expect(entries.has("gone")).toBe(false);
     });
 
+    it("ignores watcher events for same-extension files outside the base directory", async () => {
+        mkdirSync(join(rootDir, "content/snippets"), { recursive: true });
+        mkdirSync(join(rootDir, "content/other"), { recursive: true });
+        writeFileSync(join(rootDir, "content/snippets/mine.txt"), "mine");
+        const { context, entries, parseData, infos, errors, watchers } =
+            createContext(rootDir);
+        await loadRawCollection(collection, "content/snippets", "txt", context);
+        expect([...entries.keys()]).toEqual(["mine"]);
+
+        const foreignPath = join(rootDir, "content/other/foreign.txt");
+        writeFileSync(foreignPath, "foreign");
+        await watchers.handlers.change(foreignPath);
+        watchers.handlers.unlink(foreignPath);
+
+        expect([...entries.keys()]).toEqual(["mine"]);
+        expect(parseData).toHaveBeenCalledTimes(1);
+        expect(infos).toHaveLength(0);
+        expect(errors).toHaveLength(0);
+    });
+
     it("warns when the base directory has no matching files", async () => {
         mkdirSync(join(rootDir, "content/snippets"), { recursive: true });
         writeFileSync(join(rootDir, "content/snippets/readme.md"), "skip me");

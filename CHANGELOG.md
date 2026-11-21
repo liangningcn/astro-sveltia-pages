@@ -10,6 +10,28 @@ section below.
 
 ---
 
+## 0.6.1
+
+### Fixed
+
+- **Raw collections no longer react to watcher events from other collections.**
+  Astro shares one dev-server watcher across all collections; the `raw` loader
+  previously accepted any changed file with a matching extension, regardless
+  of directory. With two collections sharing an extension (e.g. `.txt`), a
+  change in one could be written into the other's store under a `../`-prefixed
+  id. Events are now filtered to paths actually inside the collection's base
+  folder, matching `glob()`'s behavior. Build-time loads were never affected.
+- Corrected the documented `format` / `extension` precedence: an explicit
+  `format` wins and determines how files are parsed; `extension` only overrides
+  the file suffix (and infers the format when `format` is omitted).
+
+### Migration
+
+- No breaking changes. Bump and reinstall; the version stamp used by
+  `init:i18n --check` moves to `0.6.1`, so re-run
+  `pnpm exec astro-sveltia-pages init:i18n` in each site repository and commit
+  the three regenerated snapshots.
+
 ## 0.6.0
 
 ### Added

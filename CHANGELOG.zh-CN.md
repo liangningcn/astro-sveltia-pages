@@ -8,6 +8,17 @@ English documentation: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 0.6.1
+
+### 修复
+
+- **raw 集合不再响应其他集合的文件变更事件。** Astro 开发服务器的所有集合共用一个 watcher；此前 raw loader 只要遇到后缀匹配的文件变化就处理，不校验目录。当两个集合共用同一后缀（如 `.txt`）时，修改其中一个集合的文件可能被以 `../` 开头的 id 写入另一个集合的 store。现在事件会先过滤出真正位于本集合 base 目录下的路径，与 `glob()` 的行为一致。构建时加载不受影响。
+- 修正文档中 `format` / `extension` 的优先级说明：显式 `format` 优先并决定文件解析方式；`extension` 仅覆盖文件后缀（省略 `format` 时用于推断格式）。
+
+### 迁移
+
+- 无破坏性变更。升级并重新安装即可；`init:i18n --check` 使用的版本戳升至 `0.6.1`，需在每个站点仓库重跑 `pnpm exec astro-sveltia-pages init:i18n` 并提交三份重新生成的快照。
+
 ## 0.6.0
 
 ### 新增

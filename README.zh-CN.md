@@ -343,7 +343,7 @@ export const collections = { posts: defineCollection({ loader: posts }) };
 | folder   | `raw`                                   | `txt`      | 每条一个完整纯文本文件，全部内容加载到唯一的 `body` 字段。  |
 | file     | （任意，除 `raw` 外）                   | —          | 单个 JSON 数组；每个元素为一条条目，ID = 0 起算的数组下标。 |
 
-无论何种格式，Zod schema 均由 CMS 的 `fields` 自动生成；`body` 字段仅在前置 frontmatter 类格式下排除。设置 `extension` 可覆盖推断的默认值（`extension` 优先于 `format`）。
+无论何种格式，Zod schema 均由 CMS 的 `fields` 自动生成；`body` 字段仅在前置 frontmatter 类格式下排除。显式设置的 `format` 优先，决定文件的解析方式；`extension` 仅覆盖用于匹配文件的后缀（省略 `format` 时则据此推断格式）。两者应保持一致，参见 Sveltia 自身的 format/extension 规则。
 
 JSON folder 集合 —— 每条一个 `.json` 文件：
 

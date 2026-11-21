@@ -348,7 +348,7 @@ export const collections = { posts: defineCollection({ loader: posts }) };
 | folder          | `raw`                                   | `txt`             | One whole plain-text file per entry, loaded into a single `body` field. |
 | file            | (any, except `raw`)                     | —                 | A single JSON array; each item is one entry, ID = 0-based array index.  |
 
-The Zod schema is generated from the CMS `fields` either way; the `body` field is excluded only for frontmatter formats. Set `extension` to override the inferred default (it takes precedence over `format`).
+The Zod schema is generated from the CMS `fields` either way; the `body` field is excluded only for frontmatter formats. An explicit `format` takes precedence and determines how files are parsed; `extension` only overrides the file suffix used to find them (and is used to infer a format when `format` is omitted). They should agree — see Sveltia's own format/extension rules.
 
 A JSON folder collection — one `.json` file per entry:
 

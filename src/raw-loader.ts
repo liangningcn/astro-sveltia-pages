@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
-import { basename, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { EntryCollection } from "@sveltia/cms";
@@ -39,8 +39,16 @@ export function loadRawCollection(
     const untouchedEntries = new Set(context.store.keys());
     const ext = `.${extension.toLowerCase()}`;
 
+    // The watcher is shared by every collection in the Astro project, so an
+    // event from another collection's folder can reach this handler. Only
+    // handle paths that actually live under this collection's base directory,
+    // mirroring glob()'s `posixRelative` + `!startsWith("../")` guard.
+    const isWithinBase = (filePath: string): boolean => {
+        const rel = relative(baseDir, filePath);
+        return !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+    };
     const isRawFile = (filePath: string): boolean =>
-        basename(filePath).toLowerCase().endsWith(ext);
+        isWithinBase(filePath) && basename(filePath).toLowerCase().endsWith(ext);
 
     const toEntryId = (filePath: string): string => {
         const rel = relative(baseDir, filePath).split(sep).join("/");
