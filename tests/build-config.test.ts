@@ -64,6 +64,29 @@ describe("buildCmsConfig — defaults", () => {
             /\[astro-sveltia-pages\].*not a valid URL/,
         );
     });
+
+    it("throws a prefixed error when siteUrl is not a valid URL", () => {
+        expect(() =>
+            buildCmsConfig({ ...baseOptions, siteUrl: "not a url" }, undefined),
+        ).toThrow(/\[astro-sveltia-pages\].*"siteUrl".*not a valid URL/);
+    });
+
+    it("rejects a non-http(s) siteUrl", () => {
+        expect(() =>
+            buildCmsConfig({ ...baseOptions, siteUrl: "ftp://example.com" }, undefined),
+        ).toThrow(/\[astro-sveltia-pages\].*"siteUrl".*http or https/);
+    });
+
+    it("accepts an explicit http localhost siteUrl for local development", () => {
+        const { config } = buildCmsConfig(
+            { ...baseOptions, siteUrl: "http://localhost:4321/" },
+            undefined,
+        );
+
+        expect((config.backend as Record<string, unknown>)["base_url"]).toBe(
+            "http://localhost:4321",
+        );
+    });
 });
 
 describe("buildCmsConfig — r2", () => {

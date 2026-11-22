@@ -192,6 +192,38 @@ describe.each(PLATFORMS)("createAuthHandler ($name)", ({ adapter, createContext 
         expect(html).not.toContain('postMessage(message, "*")');
     });
 
+    it("escapes script-breaking characters (including U+2028/U+2029) in the token", async () => {
+        const dangerousToken = 'tok<>&\u2028\u2029"';
+        const escapingHandler = createAuthHandler({
+            adapter,
+            now: () => NOW,
+            fetch: createFetchMock({ access_token: dangerousToken }),
+        });
+        const state = signState(CLIENT_SECRET, NOW);
+        const context = createContext(
+            `https://example.com/auth?code=oauth-code&state=${encodeURIComponent(state)}`,
+            {
+                env: {
+                    SITE_URL: "https://example.com",
+                    CMS_ORIGIN: "https://cms.example.com",
+                },
+            },
+        );
+        const response = await escapingHandler(context);
+        const html = await response.text();
+
+        expect(response.status).toBe(200);
+        // Raw line/paragraph separators and HTML tag brackets must never reach
+        // the inline <script> string literal; they are emitted as unicode
+        // escapes so the handover script stays syntactically valid.
+        expect(html).not.toContain("\u2028");
+        expect(html).not.toContain("\u2029");
+        expect(html).not.toContain('var token = "tok<>&');
+        expect(html).toContain(
+            'var token = "tok\\u003c\\u003e\\u0026\\u2028\\u2029\\"";',
+        );
+    });
+
     it("returns 500 when CMS_ORIGIN is missing", async () => {
         const state = signState(CLIENT_SECRET, NOW);
         const context = createContext(

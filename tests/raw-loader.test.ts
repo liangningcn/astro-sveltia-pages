@@ -189,7 +189,7 @@ describe("loadRawCollection", () => {
         const foreignPath = join(rootDir, "content/other/foreign.txt");
         writeFileSync(foreignPath, "foreign");
         await watchers.handlers.change(foreignPath);
-        watchers.handlers.unlink(foreignPath);
+        await watchers.handlers.unlink(foreignPath);
 
         expect([...entries.keys()]).toEqual(["mine"]);
         expect(parseData).toHaveBeenCalledTimes(1);

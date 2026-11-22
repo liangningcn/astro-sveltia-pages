@@ -566,14 +566,18 @@ function htmlResponse(html) {
  * string literal.
  */
 function escapeScriptString(value) {
-    return JSON.stringify(value).replace(/[<>&]/g, (char) => {
+    return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (char) => {
         switch (char) {
             case "<":
                 return "\\u003c";
             case ">":
                 return "\\u003e";
-            default:
+            case "&":
                 return "\\u0026";
+            case "\u2028":
+                return "\\u2028";
+            default:
+                return "\\u2029";
         }
     });
 }

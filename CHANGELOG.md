@@ -10,6 +10,33 @@ section below.
 
 ---
 
+## 0.6.3
+
+### Fixed
+
+- **`siteUrl` now validated as a URL at build time.** Previously the option was
+  only trimmed, so a typo such as `"not a url"` silently produced an invalid
+  CMS `base_url`/`site_url` that broke the OAuth redirect at runtime. An
+  explicit `siteUrl` is now parsed with `new URL()` and required to be an
+  absolute `http`/`https` URL (e.g. `http://localhost:4321` is accepted for
+  local development); invalid values fail the build with a prefixed error.
+- **Script-breaking characters in the OAuth token handover are escaped.** The
+  inline `<script>` string literal now escapes `U+2028` (line separator) and
+  `U+2029` (paragraph separator) in addition to `<`, `>` and `&`. These
+  characters are valid inside JSON strings but act as line terminators in some
+  JavaScript engines when embedded in a `<script>` block, which could break the
+  handover script or create an injection surface. All five are emitted as
+  unicode escape sequences (`\u003c`, `\u003e`, `\u0026`, `\u2028`, `\u2029`).
+- **Test race fix in raw-loader watcher test.** The `unlink` handler call was
+  missing `await`, so assertions could run before the async deletion settled.
+
+### Migration
+
+No action required. Re-running `init:i18n` is recommended after upgrading so
+the i18n template stamp matches `0.6.3`.
+
+---
+
 ## 0.6.2
 
 ### Added

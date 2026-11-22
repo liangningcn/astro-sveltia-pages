@@ -61,12 +61,41 @@ function stripTrailingSlash(url: string): string {
     return url.replace(/\/+$/, "");
 }
 
+/**
+ * Validates an explicit `siteUrl` just like Astro's `site` is validated by
+ * {@link toOrigin}. Previously the option was only trimmed, so a typo such as
+ * `"not a url"` silently produced an invalid CMS `base_url`/`site_url` that
+ * broke the OAuth redirect at runtime instead of failing the build.
+ */
+function toValidatedSiteUrl(siteUrl: string): string {
+    const trimmed = siteUrl.trim();
+    let parsed: URL;
+
+    try {
+        parsed = new URL(trimmed);
+    } catch (cause) {
+        throw new Error(
+            `${LOG_PREFIX} "siteUrl" is not a valid URL (got ${JSON.stringify(siteUrl)}). ` +
+                `Pass an absolute http(s) URL such as https://example.com.`,
+            { cause },
+        );
+    }
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error(
+            `${LOG_PREFIX} "siteUrl" must use http or https (got "${parsed.protocol}").`,
+        );
+    }
+
+    return stripTrailingSlash(trimmed);
+}
+
 function resolveSiteUrl(
     options: Pick<SveltiaPagesOptions, "siteUrl">,
     astroSite: string | URL | undefined,
 ): string {
     if (options.siteUrl) {
-        return stripTrailingSlash(options.siteUrl.trim());
+        return toValidatedSiteUrl(options.siteUrl);
     }
 
     if (
